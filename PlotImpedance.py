@@ -51,6 +51,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--file_types', choices=['fra', 'eis'], default='fra')
     parser.add_argument('--finetuned', type=bool, default=False)
+    parser.add_argument('--finetune', dest='finetuned', action='store_true')
+    parser.add_argument('--no-finetune', dest='finetuned', action='store_false')
+    parser.set_defaults(finetuned=True)
     #parser.add_argument('--histogram_file', default='results_of_inverse_model.file')
     #parser.add_argument('--histogram_file', default='results_of_inverse_model.file')
 
@@ -67,7 +70,7 @@ if __name__ == '__main__':
         eis=True
 
     USE_FROM_PRIOR_PLOTS = False
-
+    print(args.finetuned)
     USE_ADAM_PLOTS = args.finetuned
 
 
@@ -81,7 +84,8 @@ if __name__ == '__main__':
 
     with open(os.path.join(".", "RealData", "results_of_inverse_model_eis.file"), 'rb') as f:
         results_2 = pickle.load(f)
-        if eis:
+        if eis and (not USE_ADAM_PLOTS):
+            print('use eis 0')
             res_ = results_2
         scores_2 = sorted(map(lambda x: real_score(x[1], x[2], type='Mean'), results_2), reverse=True)
         scores_c_2 = sorted(map(lambda x: complexity_score(x[3]), results_2), reverse=True)
@@ -98,7 +102,8 @@ if __name__ == '__main__':
 
     for i in steps_adam:
         with open(os.path.join(".", "RealData", "results_fine_tuned_with_adam_{}.file".format(i)), 'rb') as f:
-            if USE_ADAM_PLOTS:
+            if USE_ADAM_PLOTS and (not eis):
+                print('use fra 1000')
                 res_ = pickle.load(f)
                 scores_finetuned_adam.append( sorted(map(lambda x: real_score(x[1], x[2], type='Mean'), res_), reverse=True))
                 scores_c_finetuned_adam.append(
@@ -124,6 +129,7 @@ if __name__ == '__main__':
     for i in steps_adam_eis:
         with open(os.path.join(".", "RealData", "results_eis_fine_tuned_with_adam_{}.file".format(i)), 'rb') as f:
             if USE_ADAM_PLOTS and eis:
+                print('use eis 1000')
                 res_ = pickle.load(f)
                 scores_finetuned_adam_eis.append( sorted(map(lambda x: real_score(x[1], x[2], type='Mean'), res_), reverse=True))
                 scores_c_finetuned_adam_eis.append(

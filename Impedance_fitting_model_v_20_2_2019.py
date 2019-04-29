@@ -2901,16 +2901,11 @@ if __name__ == '__main__':
                                            'finetune_test_data_from_prior','finetune_test_data_from_prior_with_adam',
                                            'finetune_test_data_with_adam','plot_to_scale','compress_data','plot_param_histo'])
     parser.add_argument('--logdir', required=True)
-    parser.add_argument('--new_logdir', type=bool, default=False)
+
     parser.add_argument('--batch_size', type=int, default=16+4)
     parser.add_argument('--virtual_batches', type=int, default=3)
     parser.add_argument('--learning_rate', type=float, default=2e-3/4.)
-    parser.add_argument('--visuals', type=bool, default=False)
-    parser.add_argument('--list_variables', type=bool, default=False)
 
-    parser.add_argument('--use_compressed', type=bool, default=False)
-
-    parser.add_argument('--test_fake_data', type=bool, default=False)
 
     parser.add_argument('--prob_choose_real', type=float, default=0.9)
 
@@ -2946,6 +2941,26 @@ if __name__ == '__main__':
 
     parser.add_argument('--file_types', choices=['eis', 'fra'], default='fra')
     parser.add_argument('--histogram_file', default='results_of_inverse_model.file')
+
+    parser.add_argument('--new_logdir', dest='new_logdir', action='store_true')
+    parser.add_argument('--no-new_logdir', dest='new_logdir', action='store_false')
+    parser.set_defaults(new_logdir=False)
+
+    parser.add_argument('--visuals', dest='visuals', action='store_true')
+    parser.add_argument('--no-visuals', dest='visuals', action='store_false')
+    parser.set_defaults(visuals=False)
+
+    parser.add_argument('--list_variables', dest='list_variables', action='store_true')
+    parser.add_argument('--no-list_variables', dest='list_variables', action='store_false')
+    parser.set_defaults(list_variables=False)
+
+    parser.add_argument('--use_compressed', dest='use_compressed', action='store_true')
+    parser.add_argument('--no-use_compressed', dest='use_compressed', action='store_false')
+    parser.set_defaults(use_compressed=False)
+
+    parser.add_argument('--test_fake_data', dest='test_fake_data', action='store_true')
+    parser.add_argument('--no-test_fake_data', dest='test_fake_data', action='store_false')
+    parser.set_defaults(test_fake_data=False)
 
     args = parser.parse_args()
     if args.mode == 'training_direct':

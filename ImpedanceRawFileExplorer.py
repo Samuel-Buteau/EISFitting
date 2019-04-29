@@ -20,33 +20,16 @@ class Tally():
         return sorted(self.data.items(),key=lambda x: x[1],   reverse= True)
 
 
-
-
-def MakePlotBasic(file=None, xs = [],ys = [], labels=[], x_axis="x axis", y_axis="y axis",cs = 8*['b', 'g','r','c','m','y','k'],markers = 7*['.']+7*['o']+7*['^']+7*['s']+7*['*']+7*['+']+7*['X']+7*['|'], x_window=(None,None),y_window=(None,None),x_scale='linear',y_scale='linear'):
-   fig = plt.figure()
-   ax = fig.add_subplot(111)
-   ax.set_xlabel(x_axis)
-   ax.set_ylabel(y_axis)
-   n = len(xs)
-   if not x_scale=='linear':
-      ax.set_xscale(x_scale)
-   if not y_scale=='linear':
-      ax.set_yscale(y_scale)
-      
- 
-   holder = n*['']
-   for i in range(n):
-      holder[i] = ax.scatter(xs[i],ys[i],c=cs[i%len(cs)],marker=markers[i%len(markers)])
-
-   if len(labels) > 0:
-      ax.legend(tuple(holder),tuple(labels), scatterpoints=1, ncol=2, fontsize=7)
-   ax.set_xlim(x_window[0],x_window[1])
-   ax.set_ylim(y_window[0],y_window[1])
-   if not file is None:
-      fig.savefig(file)
-      plt.close(fig)
-   else:
-      plt.show()
+class MPT_Mode(Enum):
+   Unknown =0
+   FirstLine =1
+   NbHeader =2
+   JumpToData = 3
+   Units =4
+   Data =5
+   Junk =6
+   CSVFormat = 7
+   CollectData = 8
 
 
 
@@ -276,28 +259,6 @@ def parse_fra_file(filename):
 
 
 
-##def visuals(prefix, dats):
-##   MakePlotBasic(file = prefix+'nyquist.png', xs=[dats["data"]["Re[Z]"]], ys=[-dats['data']['Im[Z]']], x_axis="Re[Z] (ohm)",y_axis='-Im[Z] (ohm)',labels=['first cell'],y_window=(0,None))
-##   MakePlotBasic(file = prefix+'bode_im.png', xs=[dats["data"]["FREQ"]], ys=[-dats['data']['Im[Z]']], x_axis="frequency (Hz)",y_axis='-Im[Z] (ohm)',labels=['first cell'],y_window=(0,None), x_scale='log')
-##   MakePlotBasic(file = prefix+'bode_re.png', xs=[dats["data"]["FREQ"]], ys=[dats['data']['Re[Z]']], x_axis="frequency (Hz)",y_axis='Re[Z] (ohm)',labels=['first cell'], x_scale='log')
-##
-##
-##
-##visuals('EIS1__',dats)
-
-
-
-
-
-def visuals( dats,prefix=None):
-   if prefix is None:
-      files = [None,None,None]
-   else:
-      files = [prefix + 'nyquist.png', prefix+'bode_im.png',prefix+'bode_re.png']
-
-   MakePlotBasic(file = files[0], xs=[dat["data"]["Re[Z]"] for dat in dats], ys=[-dat['data']['Im[Z]'] for dat in dats], x_axis="Re[Z] (ohm)",y_axis='-Im[Z] (ohm)',y_window=(0,None))
-   MakePlotBasic(file = files[1], xs=[dat["data"]["FREQ"] for dat in dats], ys=[-dat['data']['Im[Z]'] for dat in dats], x_axis="frequency (Hz)",y_axis='-Im[Z] (ohm)',y_window=(0,None), x_scale='log')
-   MakePlotBasic(file = files[2], xs=[dat["data"]["FREQ"] for dat in dats], ys=[dat['data']['Re[Z]'] for dat in dats], x_axis="frequency (Hz)",y_axis='Re[Z] (ohm)', x_scale='log')
 
 
 
@@ -307,8 +268,6 @@ def visuals( dats,prefix=None):
 
 
 
-
-#
 
 path_to_spectra = os.path.join(".", "RealData")
 
@@ -338,16 +297,6 @@ print('Number of fra files {}.'.format(len(all_fra_filenames)))
 
 
 
-class MPT_Mode(Enum):
-   Unknown =0
-   FirstLine =1
-   NbHeader =2
-   JumpToData = 3
-   Units =4
-   Data =5
-   Junk =6
-   CSVFormat = 7
-   CollectData = 8
 
 import csv
 print('Number of mpt files {}.'.format(len(all_mpt_filenames)))
