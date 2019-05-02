@@ -304,8 +304,6 @@ if __name__ == '__main__':
 
 
     print('Number of mpt files {}.'.format(len(all_mpt_filenames)))
-    with open(os.path.join('.', 'Bad_File_Examples.txt'), 'r')  as f:
-        bad_files = [x.split('\n')[0] for x in f.readlines()]
 
 
 
@@ -686,7 +684,6 @@ if __name__ == '__main__':
                         continue
 
     print('number of properly processed eis files: {}'.format(count))
-
     with open(os.path.join(".", args.data_dir, "database_eis.file"), 'wb') as f:
         pickle.dump(database_eis, f, pickle.HIGHEST_PROTOCOL)
 
