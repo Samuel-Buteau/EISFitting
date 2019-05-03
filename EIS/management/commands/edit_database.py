@@ -6,11 +6,14 @@ models_dict = {
     'AutomaticActiveSample':AutomaticActiveSample,
     'EISSpectrum':EISSpectrum,
     'ImpedanceSample':ImpedanceSample,
+    'InverseModel':InverseModel,
+    'ShiftScaleParameters':ShiftScaleParameters,
 }
 
 class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--mode', choices=['add_default_datasets',
+                                               'add_default_inverse_models',
                                                'display',
                                                'clear_all'
                                                ])
@@ -54,3 +57,32 @@ class Command(BaseCommand):
                     for dataset in Dataset.objects.filter(label=dummy['label']):
                         dataset.label = dummy['label']
                         dataset.save()
+
+
+
+        if options['mode'] == 'add_default_inverse_models':
+
+            dummies = [
+                {
+                    'logdir': 'OnePercentTraining',
+                    'kernel_size':7,
+                    'conv_filters':16,
+                    'num_conv':2,
+                },
+            ]
+            for dummy in dummies:
+                if not InverseModel.objects.filter(logdir=dummy['logdir']):
+                    inv_model = InverseModel(
+                        logdir=dummy['logdir'],
+                        kernel_size=dummy['kernel_size'],
+                        conv_filters=dummy['conv_filters'],
+                        num_conv=dummy['num_conv'],
+                    )
+                    inv_model.save()
+                else:
+                    for inv_model in InverseModel.objects.filter(logdir=dummy['logdir']):
+                        inv_model.logdir=dummy['logdir'],
+                        inv_model.kernel_size=dummy['kernel_size'],
+                        inv_model.conv_filters=dummy['conv_filters'],
+                        inv_model.num_conv=dummy['num_conv'],
+                        inv_model.save()
