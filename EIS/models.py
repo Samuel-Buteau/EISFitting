@@ -1,4 +1,8 @@
 from django.db import models
+import numpy
+from EISFittingModelDefinitions import restore_params,deparameterized_params
+
+
 '''
 TODO:
     - create a inverse_model results class
@@ -39,6 +43,25 @@ class AutomaticActiveSample(models.Model):
     def sample_to_keep_count(self):
         return self.sample_count - self.sample_to_delete_count
 
+class CircuitParameterSet(models.Model):
+    circuit = models.CharField(max_length=20)
+    def get_parameter_array(self):
+        return numpy.array([param.value for param in
+                          self.circuitparameter_set.order_by('index')])
+
+class CircuitParameter(models.Model):
+    set = models.ForeignKey(CircuitParameterSet, on_delete=models.CASCADE)
+    index = models.IntegerField(default=0)
+    value = models.FloatField(default=0)
+
+
+
+# params: {r, r_zarc_inductance, r_zarc_i...
+# ... q_warburg, q_inductance
+# ... w_c_inductance, w_c_zarc_i...
+# ... phi_warburg, phi_zarc_i...
+# ... phi_inductance, phi_zarc_inductance
+
 class ShiftScaleParameters(models.Model):
     r_alpha = models.FloatField(default=0)
     w_alpha = models.FloatField(default=0)
@@ -48,6 +71,7 @@ class ShiftScaleParameters(models.Model):
 
     def to_dict(self):
         return {'r_alpha':self.r_alpha, 'w_alpha':self.w_alpha}
+
 
 #The base class for a spectrum
 class EISSpectrum(models.Model):
@@ -135,3 +159,57 @@ class InverseModel(models.Model):
             self.kernel_size,
             self.conv_filters,
             self.num_conv)
+
+
+
+class FitSpectrum(models.Model):
+    active = models.BooleanField(default=True)
+
+class FitSample(models.Model):
+    fit = models.ForeignKey(FitSpectrum, on_delete=models.CASCADE)
+    log_ang_freq = models.FloatField()
+    real_part = models.FloatField()
+    imag_part = models.FloatField()
+
+class ActivitySetting(models.Model):
+    useless = models.BooleanField(default=True)
+
+
+class ActivitySample(models.Model):
+    setting = models.ForeignKey(ActivitySetting, on_delete=models.CASCADE)
+    sample = models.ForeignKey(ImpedanceSample, on_delete=models.CASCADE)
+    active = models.BooleanField(default=True)
+
+class InverseModelResult(models.Model):
+    spectrum=models.ForeignKey(
+        EISSpectrum,
+        on_delete=models.CASCADE
+    )
+    inv_model = models.ForeignKey(
+        InverseModel,
+        on_delete=models.CASCADE
+    )
+
+    activity_setting = models.ForeignKey(
+        ActivitySetting,
+        on_delete=models.CASCADE
+    )
+
+    shift_scale_parameters = models.OneToOneField(
+        ShiftScaleParameters,
+        on_delete=models.CASCADE
+    )
+    circuit_parameters = models.ForeignKey(
+        CircuitParameterSet,
+        on_delete=models.CASCADE
+    )
+
+    fit_spectrum = models.OneToOneField(
+        FitSpectrum,
+        on_delete=models.CASCADE
+    )
+
+    def get_circuit_parameters_in_original_form(self):
+        restored_params = restore_params(self.circuit_parameters.get_parameter_array(),
+                                         self.shift_scale_parameters.to_dict())
+        return deparameterized_params(restored_params)

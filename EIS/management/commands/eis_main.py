@@ -15,6 +15,8 @@ import re
 from import_eis_files import import_eis_file
 from EIS.models import *
 
+from matplotlib.gridspec import GridSpec
+
 
 def import_directory(args):
 
@@ -84,9 +86,38 @@ def import_directory(args):
     ImpedanceSample.objects.bulk_create(all_samples)
 
 
+def get_inv_model_results_or_none(spectrum, inv_model):
+    '''
 
-from EISFittingModelDefinitions import Prior,ParameterVAE, shift_scale_param_extract,normalized_spectrum,initialize_session
+    returns two values. first is the inv_model_results. second is a bool saying if it existed.
+    :param spectrum:
+    :param inv_model:
+    :return:
+
+    '''
+    if InverseModelResult.objects.filter(spectrum=spectrum, inv_model=inv_model).exists():
+        for inv_model_res in InverseModelResult.objects.filter(spectrum=spectrum, inv_model=inv_model):
+            match = True
+            for activity_sample in ActivitySample.objects.filter(setting=inv_model_res.activity_setting):
+                if not activity_sample.active == activity_sample.sample.active:
+                    match = False
+                    break
+
+            if match == True:
+                return inv_model_res, True
+
+    return None, False
+
+
+
+from EISFittingModelDefinitions import Prior,ParameterVAE, shift_scale_param_extract,normalized_spectrum,original_spectrum, initialize_session,restore_params,deparameterized_params
+
+
+
+
 def run_inverse_model_on_user_spectra(args):
+    user_dataset = Dataset.objects.get(label='USER')
+
     if not InverseModel.objects.filter(logdir=args['logdir']).exists():
         raise Exception('Parameter --logdir does not correspond to a valid model.')
     inv_model = InverseModel.objects.get(logdir=args['logdir'])
@@ -117,27 +148,68 @@ def run_inverse_model_on_user_spectra(args):
 
     cleaned_data = []
 
-    for spectrum in EISSpectrum.objects.filter(dataset__isnull=False).filter(dataset__label='USER'):
 
-        list_of_samples = ImpedanceSample.objects.filter(spectrum=spectrum, active=True).order_by('log_ang_freq')
+    activity_sample_list = []
+    for spectrum in user_dataset.eisspectrum_set.all():
+        _, already_exists = get_inv_model_results_or_none(spectrum,inv_model)
+        if already_exists:
+            continue
+
+        list_of_samples = spectrum.impedancesample_set.filter(active=True).order_by('log_ang_freq')
+
+
+
 
         spec_numpy = numpy.array([[samp.log_ang_freq, samp.real_part, samp.imag_part] for samp in list_of_samples if samp.active])
 
         spec_tuple = (spec_numpy[:,0],spec_numpy[:,1],spec_numpy[:,2])
         shift_scale_params = shift_scale_param_extract(spec_tuple)
+
+
+
         ssp = ShiftScaleParameters(
             r_alpha=shift_scale_params['r_alpha'],
             w_alpha=shift_scale_params['w_alpha'],
         )
         ssp.save()
-        spectrum.shift_scale_parameters = ssp
-        spectrum.save()
+
+        cp = CircuitParameterSet(
+            circuit = 'standard3zarc'
+        )
+        cp.save()
+
+        fs = FitSpectrum()
+        fs.save()
+
+        activity_setting = ActivitySetting()
+        activity_setting.save()
+
+        inverse_model_results = InverseModelResult(
+            spectrum = spectrum,
+            inv_model = inv_model,
+            activity_setting=activity_setting,
+            shift_scale_parameters = ssp,
+            circuit_parameters = cp,
+            fit_spectrum = fs,
+        )
+        inverse_model_results.save()
+
+        for samp in list_of_samples:
+            activity_sample_list.append(
+                ActivitySample(
+                    setting=activity_setting,
+                    sample = samp,
+                    active = samp.active,
+                )
+            )
 
 
+        log_freq, re_z, im_z = normalized_spectrum(spec_tuple, params=inverse_model_results.shift_scale_parameters.to_dict())
 
-        log_freq, re_z, im_z = normalized_spectrum(spec_tuple, params=spectrum.shift_scale_parameters.to_dict())
+        cleaned_data.append((log_freq,re_z,im_z,inverse_model_results.id))
 
-        cleaned_data.append((log_freq,re_z,im_z,spectrum.id))
+
+    ActivitySample.objects.bulk_create(activity_sample_list)
 
     cleaned_data = sorted(cleaned_data, key=lambda x: len(x[0]))
 
@@ -161,7 +233,7 @@ def run_inverse_model_on_user_spectra(args):
         grouped_data.append(current_group)
 
 
-
+    # this is where we run the inverse model and then record the results.
     results = []
     with initialize_session(logdir=inv_model.logdir, seed=args['seed']) as (sess, saver):
         for g in grouped_data:
@@ -171,7 +243,7 @@ def run_inverse_model_on_user_spectra(args):
             batch_ids = numpy.array([x[3] for x in g])
 
             out_impedance,in_impedance, freqs, representation_mu_value  = \
-                sess.run([  impedances, input_impedances, frequencies, representation_mu],
+                sess.run([impedances, input_impedances, frequencies, representation_mu],
                          feed_dict={batch_size: batch_len,
                                     model.dropout: 0.0,
                                     frequencies: batch_frequecies,
@@ -179,12 +251,82 @@ def run_inverse_model_on_user_spectra(args):
                                     })
 
 
-            current_results = [(freqs[index], in_impedance[index],out_impedance[index], representation_mu_value[index], batch_ids[index]) for index in range(batch_len)]
+            current_results = [
+                (freqs[index],
+                 in_impedance[index],
+                 out_impedance[index],
+                 representation_mu_value[index],
+                 batch_ids[index])
+                for index in range(batch_len)
+            ]
             results += copy.deepcopy(current_results)
 
+        circuit_parameters_list = []
+        fit_samples_list = []
+        for freqs, in_impedance,out_impedance, representation_mu_value, id in results:
+            inv_model_result = InverseModelResult.objects.get(id=id)
 
-        with open(os.path.join(".", args['output_dir'], 'inverse_model_on_user_spectra_results.file'), 'wb') as f:
-            pickle.dump(results, f, pickle.HIGHEST_PROTOCOL)
+            for i in range(len(representation_mu_value)):
+                circuit_parameters_list.append(
+                    CircuitParameter(
+                        set=inv_model_result.circuit_parameters,
+                        index = i,
+                        value = representation_mu_value[i]
+                    )
+                )
+
+            for i in range(len(freqs)):
+                fit_samples_list.append(
+                    FitSample(
+                        fit=inv_model_result.fit_spectrum,
+                        log_ang_freq = freqs[i],
+                        real_part = out_impedance[i,0],
+                        imag_part = out_impedance[i,1],
+                    )
+                )
+        CircuitParameter.objects.bulk_create(circuit_parameters_list)
+        FitSample.objects.bulk_create(fit_samples_list)
+
+
+    # This is where we do a test display of the results.
+    for spectrum in user_dataset.eisspectrum_set.all():
+        inv_model_result, should_be_true = get_inv_model_results_or_none(spectrum,inv_model)
+        if not should_be_true:
+            raise Exception('should be true but is false. spectrum was {}, inv_model was {}'.format(spectrum,inv_model))
+
+        orig_spec = numpy.array([[samp.log_ang_freq, samp.real_part, samp.imag_part] for samp in spectrum.impedancesample_set.order_by('log_ang_freq')])
+        orig_spec[:,0] = 1. / (2. * numpy.pi) * numpy.exp(orig_spec[:,0])
+
+        fit_spec_unnorm = numpy.array([[samp.log_ang_freq, samp.real_part, samp.imag_part] for samp in inv_model_result.fit_spectrum.fitsample_set.order_by('log_ang_freq')])
+        freq_fit, real_fit, imag_fit = original_spectrum((fit_spec_unnorm[:,0],fit_spec_unnorm[:,1],fit_spec_unnorm[:,2], ), inv_model_result.shift_scale_parameters.to_dict())
+        fit_spec = numpy.stack((freq_fit, real_fit, imag_fit), axis=-1)
+        fit_spec[:, 0] = 1. / (2. * numpy.pi) * numpy.exp(fit_spec[:, 0])
+
+
+
+        fig = plt.figure()
+        gs = GridSpec(2, 2, figure=fig)
+
+        ax = fig.add_subplot(gs[0,:])
+        ax.scatter(orig_spec[:,1],-orig_spec[:,2], c='k')
+        ax.plot(fit_spec[:,1],-fit_spec[:,2], c='r')
+
+        ax = fig.add_subplot(gs[1,0])
+        ax.set_xscale('log')
+        ax.scatter(orig_spec[:, 0], -orig_spec[:, 2], c='k')
+        ax.plot(fit_spec[:, 0], -fit_spec[:, 2], c='r')
+
+        ax = fig.add_subplot(gs[1,1])
+        ax.set_xscale('log')
+        ax.scatter(orig_spec[:, 0], orig_spec[:, 1], c='k')
+        ax.plot(fit_spec[:, 0], fit_spec[:, 1], c='r')
+
+        fig.tight_layout(h_pad=0., w_pad=0.)
+        plt.show()
+
+        print(inv_model_result.get_circuit_parameters_in_original_form())
+
+
 
 
 

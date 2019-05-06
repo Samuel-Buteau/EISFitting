@@ -8,6 +8,8 @@ models_dict = {
     'ImpedanceSample':ImpedanceSample,
     'InverseModel':InverseModel,
     'ShiftScaleParameters':ShiftScaleParameters,
+
+    'InverseModelResult': InverseModelResult
 }
 
 class Command(BaseCommand):

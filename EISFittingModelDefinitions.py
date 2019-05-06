@@ -1478,6 +1478,55 @@ def original_spectrum(spectrum, params):
     return (original_log_freq, original_re_z, original_im_z)
 
 
+def restore_params(params, shift_scale):
+    new_params = copy.deepcopy(params)
+    for i in range(5):
+        new_params[i] = new_params[i] + shift_scale['r_alpha']
+
+    new_params[5] = new_params[5] + shift_scale['r_alpha'] + (1./(1. + math.exp(-new_params[11]))) * shift_scale['w_alpha']
+    new_params[6] = new_params[6] + shift_scale['r_alpha'] - (1./(1. + (new_params[15])**2.)) * shift_scale['w_alpha']
+    for i in range(4):
+        new_params[7+i] = new_params[7+i] + shift_scale['w_alpha']
+
+    return new_params
+
+list_of_labels = [
+        'r_ohm',
+    'r_zarc_inductance',
+    'r_zarc_1', 'r_zarc_2', 'r_zarc_3',
+    'q_warburg',
+    'q_inductance',
+    'w_c_inductance',
+     'w_c_zarc_1', 'w_c_zarc_2', 'w_c_zarc_3',
+    'phi_warburg',
+    'phi_zarc_1', 'phi_zarc_2', 'phi_zarc_3',
+    'phi_inductance',
+    'phi_zarc_inductance'
+    ]
+
+def deparameterized_params(params):
+
+
+
+    new_params = copy.deepcopy(params)
+    for i in range(7):
+        new_params[i] = math.exp(new_params[i])
+
+    number_of_zarc = 3
+    first_mark = 1 + 1 + number_of_zarc + 2 + 1 + number_of_zarc
+    second_mark = first_mark + 1 + number_of_zarc
+
+    for i in range(first_mark,second_mark):
+        new_params[i] = 1./(1. + math.exp(-new_params[i]))
+
+    for i in range(second_mark, len(list_of_labels)):
+
+        new_params[i] = -1./(1. + (new_params[i])**2.)
+
+    return new_params
+
+
+
 def run_on_real_data(args):
     names_of_paths = {
         'fra':{
