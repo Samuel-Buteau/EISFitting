@@ -49,7 +49,7 @@ class ConvResBlock(tf.layers.Layer):
         channel_dim = 2
         self.dropout1 = tf.layers.Dropout(self.dropout, [tf.constant(1), tf.constant(1), tf.constant(self.filters)])
         self.dropout2 = tf.layers.Dropout(self.dropout, [tf.constant(1), tf.constant(1), tf.constant(2*self.half_filters+self.filters)])
-        if input_shape[channel_dim] != self.filters:
+        if input_shape[channel_dim] != self.filters + 1:
             self.down_sample = tf.layers.Conv1D(
                  self.filters, kernel_size=1,
                  activation=None, data_format="channels_last", padding="same", kernel_initializer=tf.initializers.orthogonal, name="down_sample")
@@ -58,7 +58,10 @@ class ConvResBlock(tf.layers.Layer):
 
     def call(self, inputs, training=True, debug=False):
 
-        x = self.conv1(inputs)
+        # first channel of inputs is always going to be the masks
+        masks = inputs[:, :, 0]
+        other_inputs = inputs[:,:, 1:] * tf.expand_dims(masks, axis=2)
+        x = self.conv1(other_inputs)
         x = tf.nn.relu(x)
         x = tf.layers.batch_normalization(x, trainable=training, renorm=True)
         x = self.dropout1(x, training=training)
@@ -72,6 +75,10 @@ class ConvResBlock(tf.layers.Layer):
         x_local_vals = x[:,:, 2*self.half_filters:]
 
         x_weights = tf.nn.softmax(x_preweights, axis=1)
+        # never weight in the local variables produced by
+        x_weights = x_weights * tf.expand_dims(masks, axis=2)
+        # renormalize to 1
+        x_weights = x_weights / tf.reduce_sum(x_weights, axis=1, keepdims=True)
         x_single_vector = tf.reduce_sum(x_weights * x_values, axis=1, keepdims=True)
         frequency_count= tf.shape(x)[1]
         x_global_vector = tf.tile(x_single_vector, multiples=[1,frequency_count, 1])
@@ -79,10 +86,15 @@ class ConvResBlock(tf.layers.Layer):
         x = self.conv_agregate(x_combined)
 
         if self.down_sample is not None:
-            inputs_ = self.down_sample(inputs)
+            inputs_ = self.down_sample(other_inputs)
         else:
-            inputs_ = tf.identity(inputs)
-        return tf.nn.relu(x + inputs_)
+            inputs_ = tf.identity(other_inputs)
+        return tf.concat(
+            [
+                tf.expand_dims(masks, axis=2),
+                tf.nn.relu(x + inputs_)
+            ],
+            axis=2)
 
 
 
@@ -564,17 +576,28 @@ class ParameterVAE(object):
                                                        gamma_initializer=tf.zeros_initializer(),
                                                               name="output_norm")
 
-    def build_forward(self, inputs, batch_size, priors):
+    def build_forward(self, inputs, masks, batch_size, priors):
         projected_inputs = self._input_layer_norm(self._input_layer(inputs))
 
-        hidden = projected_inputs
+        hidden = tf.concat(
+            [
+                tf.expand_dims(masks, axis=2),
+                projected_inputs
+            ],
+            axis = 2
+        )
+
         for i in range(len(self.encoding_layers)):
             hidden = self.encoding_layers[i](hidden)
 
+        # the first element will be the masks.
+        hidden = hidden[:,:, 1:]
         hidden_preweights = hidden[:,:,self.conv_filters:]
         hidden_values = hidden[:,:, :self.conv_filters]
 
         hidden_weights = tf.nn.softmax(hidden_preweights, axis=1)
+        hidden_weights = tf.expand_dims(masks, axis=2)* hidden_weights
+        hidden_weights = hidden_weights / tf.reduce_sum(hidden_weights, axis=1,  keepdims=True)
         hidden= tf.reduce_sum(hidden_weights*hidden_values, axis=1, keepdims=False)
 
         representation = self._output_layer_norm(self._output_layer(hidden)) +tf.expand_dims(priors, axis=0)
@@ -596,19 +619,23 @@ class ParameterVAE(object):
 
 
 
-    def optimize_direct(self, inputs, prior_mu, prior_log_sigma_sq,
+    def optimize_direct(self, inputs,
+                        masks, extrema_freqs,
+                        prior_mu, prior_log_sigma_sq,
                         learning_rate, global_norm_clip,
                         logdir, batch_size, trainable=True):
 
 
-        impedances, representation_mu = self.build_forward(inputs, batch_size=batch_size, priors=prior_mu)
+        impedances, representation_mu = self.build_forward(inputs, masks, batch_size=batch_size, priors=prior_mu)
 
-
-
-        _, variances = tf.nn.moments(inputs[:,:,1:],axes=[1], keep_dims=False)
+        _, variances = tf.nn.weighted_moments(inputs[:, :, 1:], axes=[1],
+                                              frequency_weights=tf.expand_dims(masks, axis=2), keep_dims=False)
         std_devs = 1.0/(0.02 + tf.sqrt(variances))
 
-        reconstruction_loss = tf.reduce_mean(tf.square(tf.expand_dims(std_devs, axis=1)*(impedances - inputs[:,:,1:])))
+        reconstruction_loss = tf.reduce_sum(masks * tf.reduce_mean(tf.square(
+            tf.expand_dims(std_devs, axis=1) * (impedances - inputs[:, :, 1:]))
+            , axis=[2]), axis=[1]) / tf.reduce_sum(masks, axis=[1])
+
 
         # simplicity loss
         rs = representation_mu[:, 2:2 + 3]
@@ -638,14 +665,14 @@ class ParameterVAE(object):
 
         number_of_zarcs = 3
         first_wc_index = 2 + number_of_zarcs + 3
-        wcs = representation_mu[:, first_wc_index:first_wc_index + number_of_zarcs]
+        wcs = representation_mu[:,
+              first_wc_index:first_wc_index + number_of_zarcs]
 
-        frequencies = inputs[:,:,0]
         ordering_loss = tf.reduce_mean(
             tf.nn.relu(wcs[:, 0] - wcs[:, 1]) +
             tf.nn.relu(wcs[:, 1] - wcs[:, 2]) +
-            tf.nn.relu(wcs[:, 2] - frequencies[:, -1]) +
-            tf.nn.relu(frequencies[:, 0] - wcs[:, 0])
+            tf.nn.relu(wcs[:, 2] - extrema_freqs[:, 1]) +
+            tf.nn.relu(extrema_freqs[:, 0] - wcs[:, 0])
         )
         prior_mu_ = tf.expand_dims(prior_mu, axis=0)
         prior_log_sigma_sq_ = tf.expand_dims(prior_log_sigma_sq, axis=0)
@@ -654,7 +681,14 @@ class ParameterVAE(object):
          0.5 * tf.reduce_mean(
                 tf.exp(- prior_log_sigma_sq_) * tf.square(representation_mu-prior_mu_))
 
-        loss = tf.stop_gradient(reconstruction_loss) * (sensible_phi_loss * self.sensible_phi_coeff +nll_loss * self.nll_coeff + simplicity_loss * self.simplicity_coeff + ordering_loss * self.ordering_coeff) + reconstruction_loss
+        loss = tf.reduce_mean(
+            tf.stop_gradient(reconstruction_loss) * (
+                    sensible_phi_loss * self.sensible_phi_coeff +
+                    nll_loss * self.nll_coeff +
+                    simplicity_loss * self.simplicity_coeff +
+                    ordering_loss * self.ordering_coeff
+            ) + reconstruction_loss)
+        reconstruction_loss = tf.reduce_mean(reconstruction_loss)
         if trainable:
             with tf.name_scope('summaries'):
                 tf.summary.scalar('loss', loss)
@@ -1266,9 +1300,10 @@ def train_on_all_data(args):
 
     cleaned_data_lens_eis = [len(c[0]) for c in cleaned_data_eis]
 
-
-
+    masks = tf.placeholder(shape=[None, None], dtype=tf.float32)
     frequencies = tf.placeholder(shape=[None, None], dtype=tf.float32)
+    extrema_freqs = tf.placeholder(shape=[None, 2], dtype=tf.float32)
+
     input_impedances = tf.placeholder(shape=[None, None, 2], dtype=tf.float32)
 
     frequencies_synth, frequencies_number_synth = Fake_frequency(batch_size)
@@ -1308,18 +1343,27 @@ def train_on_all_data(args):
     epsilon_frequency_translate = .5 * tf.random_uniform(shape=[batch_size], minval=-2., maxval=2., dtype=tf.float32)
 
     squared_impedances = input_impedances[:, :, 0] ** 2 + input_impedances[:, :, 1] ** 2
-    maxes = epsilon_scale -0.5 * tf.log(0.00001 + tf.reduce_max(squared_impedances, axis=1))
+    masked_squared_impedances = tf.where(masks > 0.5, squared_impedances, tf.ones_like(squared_impedances)*numpy.NINF )
+
+    maxes = epsilon_scale -0.5 * tf.log(0.00001 + tf.reduce_max(masked_squared_impedances, axis=1))
     pure_impedances = tf.exp(tf.expand_dims(tf.expand_dims(maxes, axis=1), axis=2)) * input_impedances
 
-    avg_freq = .5 * (frequencies[:, 0] + frequencies[:, -1]) + epsilon_frequency_translate
+
+    #problem here??
+    avg_freq = .5 * (extrema_freqs[:, 0] + extrema_freqs[:, -1]) + epsilon_frequency_translate
 
     pure_frequencies = frequencies - tf.expand_dims(avg_freq, axis=1)
+    pure_extrema_freqs = extrema_freqs - tf.expand_dims(avg_freq, axis=1)
     inputs = tf.concat([tf.expand_dims(pure_frequencies, axis=2), pure_impedances], axis=2)
 
-    model = ParameterVAE(kernel_size=args.kernel_size, conv_filters=args.conv_filters, num_conv=args.num_conv, trainable=True, num_encoded=number_of_params)
+    model = ParameterVAE(kernel_size=args.kernel_size, conv_filters=args.conv_filters, num_conv=args.num_conv,
+                         trainable=True, num_encoded=number_of_params)
 
     loss, zero_ops, accum_ops, train_step, test_ops, impedances, representation_mu, my_reconstruction_loss = \
-        model.optimize_direct(inputs=inputs, prior_mu=prior_mu,
+        model.optimize_direct(inputs=inputs,
+                              masks=masks,
+                              extrema_freqs=pure_extrema_freqs,
+                              prior_mu=prior_mu,
                               prior_log_sigma_sq=prior_log_sigma_sq,
                               learning_rate=args.learning_rate,
                               global_norm_clip=args.global_norm_clip,
@@ -1429,12 +1473,31 @@ def train_on_all_data(args):
 
                     actual_batch_size = args.batch_size
 
+                sh = my_freqs.shape
+                num_freqs = sh[1]
+                num_wanted_freqs = num_freqs + 3
+                my_full_freqs = numpy.zeros(shape=(sh[0], num_wanted_freqs),dtype=numpy.float32)
+                my_full_freqs[:, :num_freqs] = my_freqs
+
+                my_full_imps = numpy.zeros(shape=(sh[0], num_wanted_freqs,2), dtype=numpy.float32)
+                my_full_imps[:, :num_freqs,:] = my_imps
+
+
+                my_masks = numpy.zeros(shape=(sh[0], num_wanted_freqs),dtype=numpy.float32)
+                my_masks[:, :num_freqs] = numpy.ones(shape=sh, dtype=numpy.float32)
+
+                my_extrema_freqs = numpy.zeros(shape=(sh[0], 2), dtype=numpy.float32)
+                my_extrema_freqs[:, 0] = numpy.min(my_freqs, axis=1)
+                my_extrema_freqs[:, 1] = numpy.max(my_freqs, axis=1)
+
                 if count < args.virtual_batches - 1:
                     summary, reconstruction_loss_value, loss_value, _, test = \
                         sess.run([model.merger, my_reconstruction_loss, loss, accum_ops, test_ops],
                                  feed_dict={batch_size: actual_batch_size,
-                                            frequencies: my_freqs,
-                                            input_impedances: my_imps,
+                                            frequencies: my_full_freqs,
+                                            input_impedances: my_full_imps,
+                                            masks:my_masks,
+                                            extrema_freqs:my_extrema_freqs,
                                             model.dropout: args.dropout,
                                             model.sensible_phi_coeff: args.sensible_phi_coeff,
                                             model.simplicity_coeff: args.simplicity_coeff,
@@ -1447,10 +1510,11 @@ def train_on_all_data(args):
                     summary, reconstruction_loss_value, loss_value, _, test, step_value, freq, in_impedance, out_impedance = \
                         sess.run([model.merger, my_reconstruction_loss, loss, train_step, test_ops, increment_step ,pure_frequencies, pure_impedances, impedances],
                                  feed_dict={batch_size: actual_batch_size,
-                                            frequencies: my_freqs,
-                                            input_impedances: my_imps,
+                                            frequencies: my_full_freqs,
+                                            input_impedances: my_full_imps,
                                             model.dropout: args.dropout,
-
+                                            masks: my_masks,
+                                            extrema_freqs: my_extrema_freqs,
                                             model.sensible_phi_coeff: args.sensible_phi_coeff,
                                             model.simplicity_coeff: args.simplicity_coeff,
                                             model.nll_coeff: args.nll_coeff,
