@@ -697,46 +697,88 @@ class ParameterVAE(object):
             return loss, impedances, representation_mu, reconstruction_loss
 
 
+class NonparametricOptimizer(object):
+    """
+    This is my implementation of Adam optimizer to be used on the EC parameters.
 
+    """
 
+    def __init__(self, parameter_matrix, spectrum_matrix, mask_matrix, extrema_freqs_matrix):
 
-class NonparametricOptimizerAdam(object):
-
-    def __init__(self, num_encoded, beta1 , beta2, epsilon):
-        self.num_encoded = num_encoded
-        self.beta1 = beta1
-        self.beta2 = beta2
-        self.epsilon = epsilon
         self.sensible_phi_coeff = tf.placeholder(dtype=tf.float32)
         self.simplicity_coeff = tf.placeholder(dtype=tf.float32)
         self.nll_coeff = tf.placeholder(dtype=tf.float32)
         self.ordering_coeff = tf.placeholder(dtype=tf.float32)
-    def build_forward(self, current_params, frequencies, batch_size):
-        impedances = ImpedanceModel(current_params, frequencies, batch_size=batch_size)
-        return impedances
-    def optimize_direct(self, current_params, current_m,current_v,frequencies, in_impedances, prior_mu, prior_log_sigma_sq,
-                        learning_rate, batch_size, adam_time):
+        self.parameter_matrix = tf.get_variable(name='parameter_matrix', initializer=parameter_matrix)
 
-        impedances = self.build_forward(current_params, frequencies, batch_size)
-        _, variances = tf.nn.moments(in_impedances,axes=[1], keep_dims=False)
+        self.spectrum_matrix = tf.constant(value=spectrum_matrix,
+                                           name='spectrum_matrix',
+                                           shape=spectrum_matrix.shape,
+                                            )
+        self.mask_matrix = tf.constant(value=mask_matrix,
+                                           name='mask_matrix',
+                                           shape=mask_matrix.shape,
+                                           )
+
+        self.extrema_freqs_matrix = tf.constant(value=extrema_freqs_matrix,
+                                       name='extrema_freqs_matrix',
+                                       shape=extrema_freqs_matrix.shape,
+                                       )
+
+    def build_forward(self, frequencies, batch_size, indices):
+
+
+
+        z = tf.gather_nd(
+            params=self.parameter_matrix,
+            indices=tf.expand_dims(indices, axis=1)
+        )
+
+        impedances = ImpedanceModel(z, frequencies, batch_size=batch_size)
+
+        return impedances, z
+
+
+    def optimize_direct(self,
+                        indices, prior_mu,
+                        prior_log_sigma_sq,
+                        learning_rate,
+                        batch_size, trainable=True):
+
+        inputs = tf.gather_nd(
+            params=self.spectrum_matrix,
+            indices=tf.expand_dims(indices, axis=1)
+        )
+
+        extrema_freqs = tf.gather_nd(
+            params=self.extrema_freqs_matrix,
+            indices=tf.expand_dims(indices, axis=1)
+        )
+
+        impedances, representation_mu = self.build_forward(
+            frequencies=inputs[:,:,0],
+            batch_size=batch_size,
+            indices=indices
+        )
+
+        masks = tf.gather_nd(
+            params=self.mask_matrix,
+            indices=tf.expand_dims(indices, axis=1)
+        )
+
+        _, variances = tf.nn.weighted_moments(inputs[:,:,1:],axes=[1],frequency_weights=tf.expand_dims(masks, axis=2), keep_dims=False)
         std_devs = 1.0/(0.02 + tf.sqrt(variances))
-        reconstruction_loss = tf.reduce_mean(tf.square(tf.expand_dims(std_devs, axis=1)*(impedances - in_impedances)))
+
+        reconstruction_loss = tf.reduce_sum(masks * tf.reduce_mean(tf.square(
+            tf.expand_dims(std_devs, axis=1) * (impedances - inputs[:,:,1:]))
+            , axis=[2]), axis=[1]) / tf.reduce_sum(masks, axis=[1])
+
         # simplicity loss
-        rs = current_params[:, 2:2 + 3]
+        rs = representation_mu[:, 2:2 + 3]
         l_half = tf.square(tf.reduce_sum(tf.exp(.5 * rs), axis=1))
         l_1 = tf.reduce_sum(tf.exp(rs), axis=1)
         simplicity_loss = tf.reduce_mean(l_half + l_1)
-        complexity_metric = tf.reduce_mean(l_half/(1e-10 + l_1))
-        number_of_zarcs = 3
-        first_wc_index = 2 + number_of_zarcs + 3
-        wcs = current_params[:, first_wc_index:first_wc_index + number_of_zarcs]
-
-        ordering_loss = tf.reduce_mean(
-            tf.nn.relu(wcs[:, 0] - wcs[:, 1]) +
-            tf.nn.relu(wcs[:, 1] - wcs[:, 2]) +
-            tf.nn.relu(wcs[:, 2] - frequencies[:, -1]) +
-            tf.nn.relu(frequencies[:, 0] - wcs[:, 0])
-        )
+        complexity_metric = tf.reduce_mean(l_half / (1e-10 + l_1))
 
         # sensible_phi loss
 
@@ -745,8 +787,8 @@ class NonparametricOptimizerAdam(object):
         first_mark = 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs + 1
         second_mark = first_mark + 1 + number_of_zarcs
 
-        phi_warburg = tf.sigmoid(current_params[:, 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs])
-        phi_zarcs = tf.sigmoid(current_params[:, first_mark:second_mark])
+        phi_warburg = tf.sigmoid(representation_mu[:, 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs])
+        phi_zarcs = tf.sigmoid(representation_mu[:, first_mark:second_mark])
 
         sensible_phi_loss = tf.reduce_mean(
             tf.square(tf.nn.relu(0.4 - phi_warburg)) +
@@ -757,33 +799,74 @@ class NonparametricOptimizerAdam(object):
         )
 
 
+        number_of_zarcs = 3
+        first_wc_index = 2 + number_of_zarcs + 3
+        wcs = representation_mu[:, first_wc_index:first_wc_index + number_of_zarcs]
 
+        ordering_loss = tf.reduce_mean(
+            tf.nn.relu(wcs[:, 0] - wcs[:, 1]) +
+            tf.nn.relu(wcs[:, 1] - wcs[:, 2]) +
+            tf.nn.relu(wcs[:, 2] - extrema_freqs[:, 1]) +
+            tf.nn.relu(extrema_freqs[:, 0] - wcs[:, 0])
+        )
         prior_mu_ = tf.expand_dims(prior_mu, axis=0)
         prior_log_sigma_sq_ = tf.expand_dims(prior_log_sigma_sq, axis=0)
+
         nll_loss = \
          0.5 * tf.reduce_mean(
-                tf.exp(- prior_log_sigma_sq_) * tf.square(current_params-prior_mu_))
+                tf.exp(- prior_log_sigma_sq_) * tf.square(representation_mu-prior_mu_))
 
-        loss = tf.stop_gradient(reconstruction_loss) * (
-                    sensible_phi_loss * self.sensible_phi_coeff + nll_loss * self.nll_coeff + simplicity_loss * self.simplicity_coeff + ordering_loss * self.ordering_coeff) + reconstruction_loss
-
-
-
-        d_current_params = tf.gradients(ys=loss,xs=current_params)
-        number_of_zarcs = 3
-        number_of_params = 1 + 1 + number_of_zarcs + 1 + 1 + 1 + number_of_zarcs + 1 + number_of_zarcs + 1 + 1
-
-        grad_current_params = tf.reshape(d_current_params, [-1, number_of_params])
-        updates_m = self.beta1*current_m + (1.-self.beta1)*grad_current_params
-        updates_v = self.beta2 * current_v + (1. - self.beta2) * tf.square(grad_current_params)
-
-        corrected_m = (1./(1. -tf.pow(self.beta1,adam_time))) * updates_m
-        corrected_v = (1./(1. -tf.pow(self.beta2,adam_time))) * updates_v
+        loss = tf.stop_gradient(reconstruction_loss) * (sensible_phi_loss * self.sensible_phi_coeff +nll_loss * self.nll_coeff + simplicity_loss * self.simplicity_coeff + ordering_loss * self.ordering_coeff) + reconstruction_loss
+        if trainable:
 
 
-        updates = current_params - learning_rate * corrected_m / (tf.sqrt(corrected_v) + self.epsilon)
+            """
+            we clip the gradient by global norm, currently the default is 10.
+            -- Samuel B., 2018-09-14
+            """
+            optimizer = tf.train.AdamOptimizer(learning_rate)
+            train_step = optimizer.minimize(tf.reduce_sum(loss))
 
-        return loss, updates, updates_m, updates_v, impedances
+            return tf.reduce_sum(loss), train_step,  impedances,  representation_mu, reconstruction_loss
+
+        else:
+
+            return tf.reduce_sum(loss), impedances, representation_mu, reconstruction_loss
+
+
+
+
+    def get_indexed_matrices(
+            self,
+            indices,
+            batch_size):
+
+        inputs = tf.gather_nd(
+            params=self.spectrum_matrix,
+            indices=tf.expand_dims(indices, axis=1)
+        )
+        frequencies = inputs[:, :, 0]
+        impedances, z = self.build_forward(
+            frequencies=frequencies,
+            batch_size=batch_size,
+            indices=indices
+        )
+
+        masks = tf.gather_nd(
+            params=self.mask_matrix,
+            indices=tf.expand_dims(indices, axis=1)
+        )
+
+        return {
+            'frequencies':  frequencies,
+            'in_impedances':  inputs[:,:,1:],
+            'out_impedances': impedances,
+            'masks':  masks,
+            'parameters':  z
+
+        }
+
+
 
 
 

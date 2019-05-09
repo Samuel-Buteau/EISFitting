@@ -1,4 +1,0 @@
-# May 6, 2019
-making tests
-the database side of things.
-understand what is ALLOWED_HOST, and understand how the argument you give to manage.py runserver affects things, and how you visit a web page.

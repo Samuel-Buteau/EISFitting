@@ -1,6 +1,6 @@
 from django.db import models
 import numpy
-from EISFittingModelDefinitions import restore_params,deparameterized_params
+from EISFittingModelDefinitions import restore_params,deparameterized_params,normalized_spectrum
 
 
 '''
@@ -87,11 +87,7 @@ class EISSpectrum(models.Model):
         null=True
     )
 
-    shift_scale_parameters= models.OneToOneField(
-        ShiftScaleParameters,
-        on_delete=models.SET_NULL,
-        null=True
-    )
+
     def __str__(self):
         return "Spectrum {}".format(self.filename)
     def __unicode__(self):
@@ -106,21 +102,23 @@ class EISSpectrum(models.Model):
             automatic_active_sample_disp = self.automatic_active_sample.display()
 
 
-        ssp_disp = 'None'
-        if not self.shift_scale_parameters is None:
-            ssp_disp = self.shift_scale_parameters .display()
 
 
-        return "(Spectrum {}, filename {}, active {}, dataset {}, automatic_active_sample {}, ssp {})".format(
+
+        return "(Spectrum {}, filename {}, active {}, dataset {}, automatic_active_sample {})".format(
             self.id,
             self.filename,
             self.active,
             dataset_disp,
             automatic_active_sample_disp,
-            ssp_disp,
+
         )
+    def get_sample_array(self):
+        return numpy.array([[samp.log_ang_freq,samp.real_part,samp.imag_part] for samp in
+                            self.impedancesample_set.filter(active=True).order_by('log_ang_freq')])
 
-
+    def any_active(self):
+        return self.impedancesample_set.filter(active=True).exists()
 
 #a tuple (w, re[z], im[z])
 class ImpedanceSample(models.Model):
@@ -164,6 +162,9 @@ class InverseModel(models.Model):
 
 class FitSpectrum(models.Model):
     active = models.BooleanField(default=True)
+    def get_sample_array(self):
+        return numpy.array([[samp.log_ang_freq,samp.real_part,samp.imag_part] for samp in
+                            self.fitsample_set.order_by('log_ang_freq')])
 
 class FitSample(models.Model):
     fit = models.ForeignKey(FitSpectrum, on_delete=models.CASCADE)
@@ -190,7 +191,7 @@ class InverseModelResult(models.Model):
         on_delete=models.CASCADE
     )
 
-    activity_setting = models.ForeignKey(
+    activity_setting = models.OneToOneField(
         ActivitySetting,
         on_delete=models.CASCADE
     )
@@ -199,7 +200,7 @@ class InverseModelResult(models.Model):
         ShiftScaleParameters,
         on_delete=models.CASCADE
     )
-    circuit_parameters = models.ForeignKey(
+    circuit_parameters = models.OneToOneField(
         CircuitParameterSet,
         on_delete=models.CASCADE
     )
@@ -213,3 +214,53 @@ class InverseModelResult(models.Model):
         restored_params = restore_params(self.circuit_parameters.get_parameter_array(),
                                          self.shift_scale_parameters.to_dict())
         return deparameterized_params(restored_params)
+
+
+    def get_normalized_sample_array(self):
+        arr = self.spectrum.get_sample_array()
+        log_freq, re_z, im_z = normalized_spectrum((arr[:, 0], arr[:, 1], arr[:, 2]),
+                                                   params=self.shift_scale_parameters.to_dict())
+
+        return numpy.stack((log_freq, re_z, im_z), axis=-1)
+
+
+
+
+
+
+class FinetuneResult(models.Model):
+    inv_model_result=models.ForeignKey(
+        InverseModelResult,
+        on_delete=models.CASCADE
+    )
+
+    learning_rate = models.FloatField(default=1e-3)
+    nll_coeff = models.FloatField(default=1e-1)
+    ordering_coeff = models.FloatField(default=.5)
+    simplicity_coeff = models.FloatField(default=.1)
+    sensible_phi_coeff = models.FloatField(default=1.)
+
+    circuit_parameters = models.OneToOneField(
+        CircuitParameterSet,
+        on_delete=models.CASCADE
+    )
+
+    fit_spectrum = models.OneToOneField(
+        FitSpectrum,
+        on_delete=models.CASCADE
+    )
+
+    def get_circuit_parameters_in_original_form(self):
+        restored_params = restore_params(self.circuit_parameters.get_parameter_array(),
+                                         self.inv_model_result.shift_scale_parameters.to_dict())
+        return deparameterized_params(restored_params)
+
+    def display(self):
+        return \
+            'inv_model_result {} lr {} nll {}  ordering {} simplicity {} sensible phi {}'.format(
+            self.inv_model_result,
+            self.learning_rate,
+            self.nll_coeff,
+            self.ordering_coeff,
+           self.simplicity_coeff,
+           self.sensible_phi_coeff, )

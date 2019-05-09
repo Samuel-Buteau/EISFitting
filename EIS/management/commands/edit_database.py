@@ -9,7 +9,8 @@ models_dict = {
     'InverseModel':InverseModel,
     'ShiftScaleParameters':ShiftScaleParameters,
 
-    'InverseModelResult': InverseModelResult
+    'InverseModelResult': InverseModelResult,
+    'FinetuneResult': FinetuneResult
 }
 
 class Command(BaseCommand):
