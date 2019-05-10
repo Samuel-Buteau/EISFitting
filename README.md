@@ -62,3 +62,12 @@ python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraini
 see requirements.txt
 install the requirements by running on the command line "pip install <something>" with <something substituted for a requirement.
 
+# Investigation and New Features
+
+We have identified a problem with softmax over NINF. the solution was to use float32.max instead.
+There is still a problem with that code base. 
+Now trying without infinities.
+
+We still don't know the impact of having synthetic data. but not having it is not preventing overfitting
+
+We still don't know the impact of having regular convolutions. but having does not prevent overfit.
