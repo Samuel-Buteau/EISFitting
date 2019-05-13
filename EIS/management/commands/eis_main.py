@@ -865,9 +865,8 @@ def import_process_output(args):
         # must be kept in sync
         all_spectra = numpy.zeros(shape=(spectrum_count, max_len, 3), dtype=numpy.float32)
         all_ids = numpy.zeros(shape=(spectrum_count), dtype=numpy.int32)
-        all_masks = numpy.zeros(shape=(spectrum_count, max_len), dtype=numpy.float32)
+        all_valid_freqs_counts = numpy.zeros(shape=(spectrum_count), dtype=numpy.int32)
         all_params = numpy.zeros(shape=(spectrum_count, number_of_params), dtype=numpy.float32)
-        all_extrema_freqs = numpy.zeros(shape=(spectrum_count, 2), dtype=numpy.float32)
 
         main_index = 0
         for spectrum in user_dataset.eisspectrum_set.filter(active=True):
@@ -905,18 +904,15 @@ def import_process_output(args):
 
                 all_spectra[main_index, :n_arr, :] = norm_arr
                 all_ids[main_index] = finetune_results.id
-                all_masks[main_index, :n_arr] = numpy.ones(shape=(n_arr), dtype=numpy.float32)
+                all_valid_freqs_counts[main_index] = n_arr
                 all_params[main_index, :] = inv_model_result.circuit_parameters.get_parameter_array()
-                all_extrema_freqs[main_index, 0] = numpy.min(norm_arr[:, 0])
-                all_extrema_freqs[main_index, 1] = numpy.max(norm_arr[:, 0])
 
                 main_index += 1
 
         print(all_spectra)
         print(all_ids)
-        print(all_masks)
         print(all_params)
-        print(all_extrema_freqs)
+
 
         # build the computation graph
         batch_size = tf.placeholder(dtype=tf.int32)
@@ -927,8 +923,7 @@ def import_process_output(args):
         model = NonparametricOptimizer(
             parameter_matrix=all_params,
             spectrum_matrix=all_spectra,
-            mask_matrix=all_masks,
-            extrema_freqs_matrix=all_extrema_freqs,
+            valid_freqs_counts_matrix=all_valid_freqs_counts,
         )
 
         loss, train_step, impedances, representation_mu, my_reconstruction_loss = \
@@ -982,12 +977,12 @@ def import_process_output(args):
                     if (current_step % 100) == 0:
                         print('iteration {}, total loss {}'.format(current_step, loss_value))
                     if current_step == 1000:
-                        freq_val, in_val, out_val, mask_val, param_val = \
+                        freq_val, in_val, out_val, valid_freqs_counts_val, param_val = \
                             sess.run([
                                 indexed_matrices['frequencies'],
                                 indexed_matrices['in_impedances'],
                                 indexed_matrices['out_impedances'],
-                                indexed_matrices['masks'],
+                                indexed_matrices['valid_freqs_counts'],
                                 indexed_matrices['parameters'],
                             ],
                                 feed_dict={
@@ -1013,10 +1008,7 @@ def import_process_output(args):
                                     )
                                 )
 
-                            for i in range(len(freq_val[ind])):
-                                if int(mask_val[ind, i]) == 0:
-                                    break
-
+                            for i in range(valid_freqs_counts_val[ind]):
                                 fit_samples_list.append(
                                     FitSample(
                                         fit=finetune_results.fit_spectrum,

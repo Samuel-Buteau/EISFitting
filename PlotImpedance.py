@@ -36,7 +36,6 @@ def l1_norm(params):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--file_types', choices=['fra', 'eis'], default='fra')
-    parser.add_argument('--finetuned', type=bool, default=False)
     parser.add_argument('--finetune', dest='finetuned', action='store_true')
     parser.add_argument('--no-finetune', dest='finetuned', action='store_false')
     parser.set_defaults(finetuned=True)
@@ -67,8 +66,12 @@ if __name__ == '__main__':
 
 
     with open(os.path.join(".", args.data_dir, args.fra_no_finetune_file), 'rb') as f:
+
         results_1 = pickle.load(f)
+        print('got {} records fra no-finetune'.format(len(results_1)))
         res_ = results_1
+        for r in res_[:20]:
+            print(r[-1])
         scores_1 = sorted(map(lambda x: real_score(x[1], x[2], type='Mean'), results_1), reverse=True)
         scores_c_1 = sorted(map(lambda x: complexity_score(x[3]), results_1), reverse=True)
         scores_l_1 = sorted(map(lambda x: l1_norm(x[3]), results_1), reverse=True)
@@ -76,6 +79,9 @@ if __name__ == '__main__':
 
     with open(os.path.join(".", args.data_dir, args.eis_no_finetune_file), 'rb') as f:
         results_2 = pickle.load(f)
+        print('got {} records eis no-finetune'.format(len(results_2)))
+        for r in results_2[:20]:
+            print(r[-1])
         if eis and (not USE_ADAM_PLOTS):
             print('use eis 0')
             res_ = results_2
@@ -97,6 +103,19 @@ if __name__ == '__main__':
             if USE_ADAM_PLOTS and (not eis):
                 print('use fra {} steps.'.format(args.steps))
                 res_ = pickle.load(f)
+                print('got {} records fra finetune'.format(len(res_)))
+                files = []
+                for r in res_[:20]:
+                    print(r[-1])
+                    files.append(r[-1])
+                    print('old: ', r)
+                    for r in results_1:
+                        if r[-1] == files[-1]:
+                            print('new: ', r)
+
+
+
+
                 scores_finetuned_adam.append( sorted(map(lambda x: real_score(x[1], x[2], type='Mean'), res_), reverse=True))
                 scores_c_finetuned_adam.append(
                     sorted(map(lambda x: complexity_score(x[3]), res_), reverse=True))
@@ -104,6 +123,9 @@ if __name__ == '__main__':
                     sorted(map(lambda x: l1_norm(x[3]), res_), reverse=True))
             else:
                 dummy = pickle.load(f)
+                print('got {} records fra finetune'.format(len(dummy)))
+                for r in dummy[:20]:
+                    print(r[-1])
                 scores_finetuned_adam.append( sorted(map(lambda x: real_score(x[1], x[2], type='Mean'), dummy), reverse=True))
                 scores_c_finetuned_adam.append( sorted(map(lambda x: complexity_score(x[3]), dummy), reverse=True))
                 scores_l_finetuned_adam.append(sorted(map(lambda x: l1_norm(x[3]), dummy), reverse=True))
@@ -123,6 +145,9 @@ if __name__ == '__main__':
             if USE_ADAM_PLOTS and eis:
                 print('use fra {} steps.'.format(args.steps))
                 res_ = pickle.load(f)
+                print('got {} records eis finetune'.format(len(res_)))
+                for r in res_[:20]:
+                    print(r[-1])
                 scores_finetuned_adam_eis.append( sorted(map(lambda x: real_score(x[1], x[2], type='Mean'), res_), reverse=True))
                 scores_c_finetuned_adam_eis.append(
                     sorted(map(lambda x: complexity_score(x[3]), res_), reverse=True))
@@ -130,6 +155,9 @@ if __name__ == '__main__':
                     sorted(map(lambda x: l1_norm(x[3]), res_), reverse=True))
             else:
                 dummy = pickle.load(f)
+                print('got {} records eis finetune'.format(len(dummy)))
+                for r in dummy[:20]:
+                    print(r[-1])
                 scores_finetuned_adam_eis.append( sorted(map(lambda x: real_score(x[1], x[2], type='Mean'), dummy), reverse=True))
                 scores_c_finetuned_adam_eis.append( sorted(map(lambda x: complexity_score(x[3]), dummy), reverse=True))
                 scores_l_finetuned_adam_eis.append(sorted(map(lambda x: l1_norm(x[3]), dummy), reverse=True))
