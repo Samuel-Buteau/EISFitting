@@ -13,7 +13,7 @@ import pickle
 """
 wider Conv Residual Block
 """
-
+#TODO: always reset every layer to 0 where mask is 0
 class ConvResBlock(tf.layers.Layer):
     def __init__(self, filters, kernel_size, strides=1, dilation_rate=1, dropout=0.2,
                  trainable=True, name=None, dtype=None,
@@ -25,30 +25,23 @@ class ConvResBlock(tf.layers.Layer):
         )
         self.dropout = dropout
         self.filters = filters
-        self.half_filters = int(float(filters)/2.)
         self.conv1 = tf.layers.Conv1D(
             filters=self.filters, kernel_size=kernel_size , strides=strides,
             dilation_rate=dilation_rate, activation=None, padding="same",
             name="conv1", kernel_initializer=tf.initializers.orthogonal)
         self.conv2 = tf.layers.Conv1D(
-            filters=2*self.half_filters+self.filters, kernel_size=kernel_size, strides=strides,
+            filters=self.filters, kernel_size=kernel_size, strides=strides,
             dilation_rate=dilation_rate, activation=None, padding="same",
-
             name="conv2", kernel_initializer=tf.initializers.orthogonal)
 
-        self.conv_agregate = tf.layers.Conv1D(
-            filters=self.filters, kernel_size=1, strides=strides,
-            dilation_rate=dilation_rate, activation=None, padding="same",
-
-            name="conv_agregate", kernel_initializer=tf.initializers.orthogonal)
 
         self.down_sample = None
 
-    def build(self, input_shape_):
-        input_shape = input_shape_[1]
+    def build(self, input_shape):
+
         channel_dim = 2
         self.dropout1 = tf.layers.Dropout(self.dropout, [tf.constant(1), tf.constant(1), tf.constant(self.filters)])
-        self.dropout2 = tf.layers.Dropout(self.dropout, [tf.constant(1), tf.constant(1), tf.constant(2*self.half_filters+self.filters)])
+        self.dropout2 = tf.layers.Dropout(self.dropout, [tf.constant(1), tf.constant(1), tf.constant(self.filters)])
         if input_shape[channel_dim] != self.filters:
             self.down_sample = tf.layers.Conv1D(
                  self.filters, kernel_size=1,
@@ -56,13 +49,10 @@ class ConvResBlock(tf.layers.Layer):
 
         self.built = True
 
-    def call(self, inputs_, training=True, debug=False):
+    def call(self, inputs, training=True, debug=False):
 
-        # first channel of inputs is always going to be the masks
-        masks = inputs_[0]
-        masks_float = tf.cast(masks,dtype=tf.float32)
-        inputs = inputs_[1]
-        inputs = inputs * tf.expand_dims(masks_float, axis=2)
+
+
         x = self.conv1(inputs)
         x = tf.nn.relu(x)
         x = tf.layers.batch_normalization(x, trainable=training, renorm=True)
@@ -71,17 +61,6 @@ class ConvResBlock(tf.layers.Layer):
         x = tf.nn.relu(x)
         x = tf.layers.batch_normalization(x, trainable=training,gamma_initializer=tf.zeros_initializer(), renorm=True)
         x = self.dropout2(x, training=training)
-
-        x_preweights = x[:,:,:self.half_filters]
-        x_values = x[:, :, self.half_filters:2*self.half_filters]
-        x_local_vals = x[:,:, 2*self.half_filters:]
-        x_preweights = tf.where(tf.tile(tf.expand_dims(masks,axis=2), multiples=[1,1,self.half_filters]), x_preweights, -tf.float32.max*tf.ones_like(x_preweights))
-        x_weights = tf.nn.softmax(x_preweights, axis=1)
-        x_single_vector = tf.reduce_sum(x_weights * x_values, axis=1, keepdims=True)
-        frequency_count= tf.shape(x)[1]
-        x_global_vector = tf.tile(x_single_vector, multiples=[1,frequency_count, 1])
-        x_combined = tf.concat([x_local_vals, x_global_vector], axis=2)
-        x = self.conv_agregate(x_combined)
 
         if self.down_sample is not None:
             inputs_down_sample = self.down_sample(inputs)
@@ -92,110 +71,6 @@ class ConvResBlock(tf.layers.Layer):
 
 
 
-
-
-
-def Fake_frequency(batch_size):
-
-
-    w_delta_ = tf.random_uniform(
-        shape=[batch_size],
-        minval=12.,
-        maxval=18.,
-        dtype=tf.float32
-
-    )
-
-    w_min = -0.5* w_delta_
-    w_max = +0.5* w_delta_
-
-    number_of_samples = tf.random.uniform(
-    shape=[1],
-    minval=50,
-    maxval=80,
-    dtype=tf.int32
-    )
-
-
-    delta = (w_max-w_min)/tf.to_float(number_of_samples)
-
-    w_min = tf.expand_dims(w_min, axis=1)
-
-    ranges = tf.expand_dims(delta, axis=1) * tf.expand_dims(tf.to_float(tf.range(number_of_samples[0])),axis=0)
-    frequencies = w_min + ranges
-
-    return frequencies, number_of_samples
-
-
-def RectifyParams(params, batch_size):
-    # TODO: Fix the gather call!!!! it is not working.
-    # params: {r, r_zarc_inductance, r_zarc_i...
-    # ... q_warburg, q_inductance
-    # ... w_c_inductance, w_c_zarc_i...
-    # ... phi_warburg, phi_zarc_i...
-    # ... phi_inductance, phi_zarc_inductance
-    number_of_zarc = 3
-    number_of_params = 1 + 1 + number_of_zarc + 1 + 1 + 1 + number_of_zarc + 1 + number_of_zarc + 1 + 1
-
-    number_index_before = 1 + 1 + number_of_zarc + 1 + 1 + 1
-    positions_to_shuffle = tf.math.top_k(
-        -params[:,number_index_before:number_index_before + number_of_zarc ],
-        k=3,
-        sorted=True
-    )
-
-    indecies = positions_to_shuffle.indices
-    new_params = params
-
-
-
-
-    index_start = 2
-    first_slice = tf.batch_gather(params, indecies + index_start)
-
-    index_start_1 = 2 + number_of_zarc + 2 + 1
-    second_slice = tf.batch_gather(params, indecies + index_start_1)
-
-    index_start_2 = 2 + number_of_zarc + 2 + 1 + number_of_zarc + 1
-    third_slice = tf.batch_gather(params, indecies + index_start_2)
-
-    new_params = tf.transpose(new_params)
-
-    first_slice = tf.transpose(first_slice)
-    second_slice = tf.transpose(second_slice)
-    third_slice = tf.transpose(third_slice)
-
-    updating = tf.scatter_nd( indices=tf.constant([[index_start + i] for i in range(number_of_zarc)]), updates=first_slice, shape=[number_of_params, batch_size])
-    mask = tf.scatter_nd( indices=tf.constant([[index_start + i] for i in range(number_of_zarc)]), updates=tf.ones_like(first_slice), shape=[number_of_params, batch_size ])
-    new_params = tf.where(condition=mask > 0.5, x=updating, y=new_params)
-
-    updating = tf.scatter_nd( indices=tf.constant([[index_start_1 + i] for i in range(number_of_zarc)]), updates=second_slice, shape=[number_of_params, batch_size])
-    mask = tf.scatter_nd( indices=tf.constant([[index_start_1 + i] for i in range(number_of_zarc)]), updates=tf.ones_like(second_slice), shape=[number_of_params, batch_size ])
-    new_params = tf.where(condition=mask > 0.5, x=updating, y=new_params)
-
-    updating = tf.scatter_nd( indices=tf.constant([[index_start_2 + i] for i in range(number_of_zarc)]), updates=third_slice, shape=[number_of_params, batch_size])
-    mask = tf.scatter_nd( indices=tf.constant([[index_start_2 + i] for i in range(number_of_zarc)]), updates=tf.ones_like(third_slice), shape=[number_of_params, batch_size ])
-    new_params = tf.where(condition=mask > 0.5, x=updating, y=new_params)
-
-    new_params = tf.transpose(new_params)
-
-    return new_params
-
-
-def TransformParamsR(params, rs):
-
-
-    # params: {r, r_zarc_inductance, r_zarc_i...
-    # ... q_warburg, q_inductance
-    # ... w_c_inductance, w_c_zarc_i...
-    # ... phi_warburg, phi_zarc_i...
-    # ... phi_inductance, phi_zarc_inductance
-    number_of_zarcs = 3
-    params1 = params[:,:-1-number_of_zarcs-1-1] * tf.expand_dims(rs, axis=1)
-    params2 = params[:,-1-number_of_zarcs-1-1:]
-
-    new_params = tf.concat([params1,params2], axis=1)
-    return new_params
 
 def Prior():
     '''
@@ -252,7 +127,7 @@ def Prior():
     return mu,log_square_sigma
 
 
-
+#TODO: make some components maskable
 def ImpedanceModel(params_, frequencies_, batch_size):
     '''
 
@@ -352,84 +227,10 @@ def ImpedanceModel(params_, frequencies_, batch_size):
 
     return impedance_stacked
 
-
 '''
-Priors and Impedance models for harder optimization problems.
-
-
-'''
-
-
-def HardPrior(number_of_zarcs=7):
-
-    target_resistance = 0.6
-    unit_resistance = math.log(target_resistance/float(number_of_zarcs))
-
-
-
-
-    mu = numpy.array([[
-        -1.,
-        -2.,
-        ] + number_of_zarcs*[unit_resistance] + [
-        -7.,
-        -9.,
-        10.,] + [(-5.  + float(d)/float(number_of_zarcs-1)*(5.-(-5.)))  for d in range(number_of_zarcs)] +[
-        1.,] + number_of_zarcs*[1.5] +[
-        0.,
-        0.
-    ],[
-        -5.,
-        -5.,
-        ] + number_of_zarcs*[unit_resistance + 1.] + [
-        -7.,
-        -15.,
-        13.,] + [(-7.  + float(d)/float(number_of_zarcs-1)*(7.-(-7.)))  for d in range(number_of_zarcs)] +[
-        .5,] + number_of_zarcs*[1.] +[
-        0.,
-        0.
-    ]])
-
-
-
-    log_square_sigma = 2.*numpy.log(numpy.array([[
-        2.,
-        2.,
-        ] + number_of_zarcs*[2.] +
-        [
-        4.,
-        1.5,
-        1.5,] +
-        number_of_zarcs*[16./float(number_of_zarcs)]+ [
-        4.,
-        ] + number_of_zarcs*[4.] + [
-        .2,
-        .2
-    ],[
-        4.,
-        1.5,
-        ] + number_of_zarcs*[3.] +
-        [
-        3.,
-        3,
-        1.5,] +
-        number_of_zarcs*[24./float(number_of_zarcs)]+ [
-        1.,
-        ] + number_of_zarcs*[4.] + [
-        .2,
-        .2
-    ]]))
-
-    return mu, log_square_sigma
-
 
 def HardImpedanceModel(params_, masks, frequencies_, batch_size, number_of_zarcs=7):
-    '''
-
-    :param params:
-    :param frequencies:
-    :return:
-    '''
+    
 
     params = tf.to_double(params_)
     frequencies = tf.to_double(frequencies_)
@@ -451,13 +252,7 @@ def HardImpedanceModel(params_, masks, frequencies_, batch_size, number_of_zarcs
     params_to_sigm = tf.sigmoid(params_reshaped[:, first_mark:second_mark])
     params_to_neg_sigm = -1. / (1. + tf.square(params_reshaped[:, second_mark:]))
 
-    '''
-       - Resistor, parameters {R}: Z(W) = R + i * 0
-       - Constant Phase Element, parameters {q, phi}: Z(W) = exp(q) * W^-Phi * (i)^-Phi 
-       - Zarc, parameters {R, W_c, Phi}: Z(W) = R/(1 + (i W/W_c)^(Phi))
-
-
-    '''
+    
 
     last_frequencies = 1.0 + frequencies[:,-1]
 
@@ -521,7 +316,7 @@ def HardImpedanceModel(params_, masks, frequencies_, batch_size, number_of_zarcs
     impedance_stacked = tf.to_float(tf.stack([impedance_real, impedance_imag], axis=2))
 
     return tf.stop_gradient(impedance_stacked)
-
+'''
 
 class ParameterVAE(object):
 
@@ -572,21 +367,29 @@ class ParameterVAE(object):
                                                               name="output_norm")
 
     def build_forward(self, inputs, masks, batch_size, priors):
-        projected_inputs = self._input_layer_norm(self._input_layer(inputs))
+        inputs_ = tf.concat(
+            (
+                tf.expand_dims(tf.cast(masks,dtype=tf.float32), axis=2),
+                inputs
+            ),
+            axis=2
+        )
+        projected_inputs = self._input_layer_norm(self._input_layer(inputs_))
 
         hidden =projected_inputs
 
 
         for i in range(len(self.encoding_layers)):
-            hidden = self.encoding_layers[i]([masks, hidden])
+            hidden = self.encoding_layers[i](hidden)
 
         hidden_preweights = hidden[:,:,self.conv_filters:]
         hidden_values = hidden[:,:, :self.conv_filters]
 
-        hidden_preweights = tf.where(tf.tile(tf.expand_dims(masks, axis=2), multiples=[1,1,self.conv_filters]), hidden_preweights, -tf.float32.max * tf.ones_like(hidden_preweights))
+        #hidden_preweights = tf.where(tf.tile(tf.expand_dims(masks, axis=2), multiples=[1,1,self.conv_filters]), hidden_preweights, -1e1 * tf.ones_like(hidden_preweights))
         hidden_weights = tf.nn.softmax(hidden_preweights, axis=1)
-        hidden= tf.reduce_sum(hidden_weights*hidden_values, axis=1, keepdims=False)
+        hidden_weights = hidden_weights * tf.expand_dims(tf.cast(masks,dtype=tf.float32), axis=2)
 
+        hidden=tf.reduce_sum(hidden_weights*hidden_values, axis=1, keepdims=False)
         representation = self._output_layer_norm(self._output_layer(hidden)) +tf.expand_dims(priors, axis=0)
 
         # get a single vector
@@ -610,126 +413,152 @@ class ParameterVAE(object):
                         valid_freqs_counts,
                         freqs_num,
                         prior_mu, prior_log_sigma_sq,
-                        learning_rate, global_norm_clip,
-                        logdir, batch_size, trainable=True):
+                        batch_size,
+                        learning_rate=None,
+                        global_norm_clip=None,
+                        logdir=None,
+                        trainable=True,
+                        create_loss=True):
 
+        true_freqs_num = tf.reduce_max(valid_freqs_counts)
         masks_logical = tf.sequence_mask(
                             lengths=valid_freqs_counts,
-                            maxlen=freqs_num,
+                            maxlen=true_freqs_num,
                         )
+
+
+        inputs = inputs[:, :true_freqs_num,:]
 
         masks_float = tf.cast(masks_logical,dtype=tf.float32)
 
         impedances, representation_mu = self.build_forward(inputs, masks_logical, batch_size=batch_size, priors=prior_mu)
 
-        _, variances = tf.nn.weighted_moments(inputs[:, :, 1:], axes=[1],
-                                              frequency_weights=tf.expand_dims(masks_float, axis=2), keep_dims=False)
-        std_devs = 1.0/(0.02 + tf.sqrt(variances))
 
-        reconstruction_loss = tf.reduce_sum(masks_float * tf.reduce_mean(tf.square(
-            tf.expand_dims(std_devs, axis=1) * (impedances - inputs[:, :, 1:]))
-            , axis=[2]), axis=[1]) / tf.reduce_sum(masks_float, axis=[1])
-
-
-        # simplicity loss
-        rs = representation_mu[:, 2:2 + 3]
-        l_half = tf.square(tf.reduce_sum(tf.exp(.5 * rs), axis=1))
-        l_1 = tf.reduce_sum(tf.exp(rs), axis=1)
-        simplicity_loss = tf.reduce_mean(l_half + l_1)
-        complexity_metric = tf.reduce_mean(l_half / (1e-10 + l_1))
-
-        # sensible_phi loss
-
-        number_of_zarcs = 3
-
-        first_mark = 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs + 1
-        second_mark = first_mark + 1 + number_of_zarcs
-
-        phi_warburg = tf.sigmoid(representation_mu[:, 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs])
-        phi_zarcs = tf.sigmoid(representation_mu[:, first_mark:second_mark])
-
-        sensible_phi_loss = tf.reduce_mean(
-            tf.square(tf.nn.relu(0.4 - phi_warburg)) +
-            tf.square(tf.nn.relu(phi_warburg - 0.6)) +
-            tf.nn.relu(0.5 - phi_zarcs[:, 1]) +
-            tf.nn.relu(0.5 - phi_zarcs[:, 2]) +
-            tf.nn.relu(0.5 - phi_zarcs[:, 3])
-        )
-
-
-        number_of_zarcs = 3
-        first_wc_index = 2 + number_of_zarcs + 3
-        wcs = representation_mu[:,
-              first_wc_index:first_wc_index + number_of_zarcs]
-
-
-        frequencies = inputs[:,:,0]
-        max_frequencies =tf.gather_nd(
-            params=frequencies,
-            indices=tf.stack((tf.range(batch_size), valid_freqs_counts), axis=1)
-        )
-
-        ordering_loss = tf.reduce_mean(
-            tf.nn.relu(wcs[:, 0] - wcs[:, 1]) +
-            tf.nn.relu(wcs[:, 1] - wcs[:, 2]) +
-            tf.nn.relu(wcs[:, 2] - max_frequencies[:]) +
-            tf.nn.relu(frequencies[:, 0] - wcs[:, 0])
-        )
-        prior_mu_ = tf.expand_dims(prior_mu, axis=0)
-        prior_log_sigma_sq_ = tf.expand_dims(prior_log_sigma_sq, axis=0)
-
-        nll_loss = \
-         0.5 * tf.reduce_mean(
-                tf.exp(- prior_log_sigma_sq_) * tf.square(representation_mu-prior_mu_))
-
-        loss = tf.reduce_mean(
-            tf.stop_gradient(reconstruction_loss) * (
-                    sensible_phi_loss * self.sensible_phi_coeff +
-                    nll_loss * self.nll_coeff +
-                    simplicity_loss * self.simplicity_coeff +
-                    ordering_loss * self.ordering_coeff
-            ) + reconstruction_loss)
-        reconstruction_loss = tf.reduce_mean(reconstruction_loss)
-        if trainable:
-            with tf.name_scope('summaries'):
-                tf.summary.scalar('loss', loss)
-                tf.summary.scalar('nll_loss', nll_loss)
-                tf.summary.scalar('simplicity loss', complexity_metric)
-                tf.summary.scalar('ordering loss', ordering_loss)
-                tf.summary.scalar('sensible phi loss', sensible_phi_loss)
-                tf.summary.scalar('l1 loss', tf.reduce_mean(l_1))
-                tf.summary.scalar('l1/2 loss', tf.reduce_mean(l_half))
-                tf.summary.scalar('sqrt reconstruction_loss', tf.sqrt(reconstruction_loss))
-                tf.summary.scalar('average mu', tf.reduce_mean(representation_mu))
-
-            self.merger = tf.summary.merge_all()
-            self.train_writer = tf.summary.FileWriter(os.path.join(logdir, 'train'))
-            self.test_writer = tf.summary.FileWriter(os.path.join(logdir, 'test'))
-
-            """
-            we clip the gradient by global norm, currently the default is 10.
-            -- Samuel B., 2018-09-14
-            """
-            optimizer = tf.train.AdamOptimizer(learning_rate)
-            tvs = tf.trainable_variables()
-            accum_vars = [tf.Variable(tf.zeros_like(tv.initialized_value()), trainable=False) for tv in tvs]
-            zero_ops = [tv.assign(tf.zeros_like(tv)) for tv in accum_vars]
-            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-            with tf.control_dependencies(update_ops):
-                gvs = optimizer.compute_gradients(loss, tvs)
-
-            test_ops = tf.reduce_any(tf.concat([[tf.reduce_any(tf.is_nan(gv[0]), keepdims=False)] for i, gv in enumerate(gvs)],axis=0))
-
-            accum_ops = tf.cond(test_ops, false_fn=lambda:[accum_vars[i].assign_add(gv[0]) for i, gv in enumerate(gvs)], true_fn=lambda:[accum_vars[i].assign_add(tf.zeros_like(gv[0])) for i, gv in enumerate(gvs)])
-            with tf.control_dependencies(accum_ops):
-                gradients, _ = tf.clip_by_global_norm(accum_vars, global_norm_clip)
-            train_step = optimizer.apply_gradients([(gradients[i], gv[1]) for i, gv in enumerate(gvs)])
-
-            return loss, zero_ops, accum_ops, train_step, test_ops, impedances,  representation_mu, reconstruction_loss
-
+        if not create_loss:
+            return impedances, representation_mu
         else:
+            _, variances = tf.nn.weighted_moments(inputs[:, :, 1:], axes=[1],
+                                                  frequency_weights=tf.expand_dims(masks_float, axis=2), keep_dims=False)
+            std_devs = 1.0/(0.02 + tf.sqrt(variances))
 
-            return loss, impedances, representation_mu, reconstruction_loss
+            reconstruction_loss = (
+                tf.reduce_sum(
+                    masks_float *
+                        tf.reduce_mean(
+                            tf.square(
+                                tf.expand_dims(std_devs, axis=1) *
+                                (impedances - inputs[:, :, 1:])
+                            ),
+                            axis=[2]
+                        ),
+                    axis=[1]
+                ) /
+                tf.reduce_sum(masks_float, axis=[1])
+            )
+
+
+            # simplicity loss
+            rs = representation_mu[:, 2:2 + 3]
+            l_half = tf.square(tf.reduce_sum(tf.exp(.5 * rs), axis=1))
+            l_1 = tf.reduce_sum(tf.exp(rs), axis=1)
+            simplicity_loss = (l_half + l_1)
+            complexity_metric = tf.reduce_mean(l_half / (1e-10 + l_1))
+
+            # sensible_phi loss
+
+            number_of_zarcs = 3
+
+            first_mark = 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs + 1
+            second_mark = first_mark + 1 + number_of_zarcs
+
+            phi_warburg = tf.sigmoid(representation_mu[:, 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs])
+            phi_zarcs = tf.sigmoid(representation_mu[:, first_mark:second_mark])
+
+            sensible_phi_loss = (
+                tf.square(tf.nn.relu(0.4 - phi_warburg)) +
+                tf.square(tf.nn.relu(phi_warburg - 0.6)) +
+                tf.nn.relu(0.5 - phi_zarcs[:, 1]) +
+                tf.nn.relu(0.5 - phi_zarcs[:, 2]) +
+                tf.nn.relu(0.5 - phi_zarcs[:, 3])
+            )
+
+
+            number_of_zarcs = 3
+            first_wc_index = 2 + number_of_zarcs + 3
+            wcs = representation_mu[:,
+                  first_wc_index:first_wc_index + number_of_zarcs]
+
+
+            frequencies = inputs[:,:,0]
+            max_frequencies =tf.gather_nd(
+                params=frequencies,
+                indices=tf.stack((tf.range(batch_size), valid_freqs_counts-1), axis=1)
+            )
+
+            ordering_loss = (
+                tf.nn.relu(wcs[:, 0] - wcs[:, 1]) +
+                tf.nn.relu(wcs[:, 1] - wcs[:, 2]) +
+                tf.nn.relu(wcs[:, 2] - max_frequencies[:]) +
+                tf.nn.relu(frequencies[:, 0] - wcs[:, 0])
+            )
+
+            prior_mu_ = tf.expand_dims(prior_mu, axis=0)
+            prior_log_sigma_sq_ = tf.expand_dims(prior_log_sigma_sq, axis=0)
+
+            nll_loss = \
+             0.5 * tf.reduce_mean(
+                    tf.exp(- prior_log_sigma_sq_) * tf.square(representation_mu-prior_mu_),
+                 axis = 1
+             )
+
+            loss = tf.reduce_mean(
+                tf.stop_gradient(reconstruction_loss)) * (
+                        tf.reduce_mean(sensible_phi_loss) * self.sensible_phi_coeff +
+                        tf.reduce_mean(nll_loss) * self.nll_coeff +
+                        tf.reduce_mean(simplicity_loss) * self.simplicity_coeff +
+                        tf.reduce_mean(ordering_loss) * self.ordering_coeff
+                ) + tf.reduce_mean(reconstruction_loss)
+            reconstruction_loss = tf.reduce_mean(reconstruction_loss)
+            if trainable:
+                with tf.name_scope('summaries'):
+                    tf.summary.scalar('loss', loss)
+                    tf.summary.scalar('nll_loss', tf.reduce_mean(nll_loss))
+                    tf.summary.scalar('simplicity loss', complexity_metric)
+                    tf.summary.scalar('ordering loss', tf.reduce_mean(ordering_loss))
+                    tf.summary.scalar('sensible phi loss', tf.reduce_mean(sensible_phi_loss))
+                    tf.summary.scalar('l1 loss', tf.reduce_mean(l_1))
+                    tf.summary.scalar('l1/2 loss', tf.reduce_mean(l_half))
+                    tf.summary.scalar('sqrt reconstruction_loss', tf.sqrt(reconstruction_loss))
+                    tf.summary.scalar('average mu', tf.reduce_mean(representation_mu))
+
+                self.merger = tf.summary.merge_all()
+                self.train_writer = tf.summary.FileWriter(os.path.join(logdir, 'train'))
+                self.test_writer = tf.summary.FileWriter(os.path.join(logdir, 'test'))
+
+                """
+                we clip the gradient by global norm, currently the default is 10.
+                -- Samuel B., 2018-09-14
+                """
+                optimizer = tf.train.AdamOptimizer(learning_rate)
+                tvs = tf.trainable_variables()
+                accum_vars = [tf.Variable(tf.zeros_like(tv.initialized_value()), trainable=False) for tv in tvs]
+                zero_ops = [tv.assign(tf.zeros_like(tv)) for tv in accum_vars]
+                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                with tf.control_dependencies(update_ops):
+                    gvs = optimizer.compute_gradients(loss, tvs)
+
+                test_ops = tf.reduce_any(tf.concat([[tf.reduce_any(tf.is_nan(gv[0]), keepdims=False)] for i, gv in enumerate(gvs)],axis=0))
+
+                accum_ops = tf.cond(test_ops, false_fn=lambda:[accum_vars[i].assign_add(gv[0]) for i, gv in enumerate(gvs)], true_fn=lambda:[accum_vars[i].assign_add(tf.zeros_like(gv[0])) for i, gv in enumerate(gvs)])
+                with tf.control_dependencies(accum_ops):
+                    gradients, _ = tf.clip_by_global_norm(accum_vars, global_norm_clip)
+                train_step = optimizer.apply_gradients([(gradients[i], gv[1]) for i, gv in enumerate(gvs)])
+
+                return loss, zero_ops, accum_ops, train_step, test_ops, impedances,  representation_mu, reconstruction_loss
+
+            else:
+
+                return loss, impedances, representation_mu, reconstruction_loss
 
 
 class NonparametricOptimizer(object):
@@ -738,7 +567,7 @@ class NonparametricOptimizer(object):
 
     """
 
-    def __init__(self, parameter_matrix, spectrum_matrix, mask_matrix, extrema_freqs_matrix):
+    def __init__(self, parameter_matrix, spectrum_matrix, valid_freqs_counts_matrix):
 
         self.sensible_phi_coeff = tf.placeholder(dtype=tf.float32)
         self.simplicity_coeff = tf.placeholder(dtype=tf.float32)
@@ -750,15 +579,13 @@ class NonparametricOptimizer(object):
                                            name='spectrum_matrix',
                                            shape=spectrum_matrix.shape,
                                             )
-        self.mask_matrix = tf.constant(value=mask_matrix,
-                                           name='mask_matrix',
-                                           shape=mask_matrix.shape,
+        self.valid_freqs_counts_matrix = tf.constant(value=valid_freqs_counts_matrix,
+                                           name='valid_freqs_counts_matrix',
+                                           shape=valid_freqs_counts_matrix.shape,
                                            )
 
-        self.extrema_freqs_matrix = tf.constant(value=extrema_freqs_matrix,
-                                       name='extrema_freqs_matrix',
-                                       shape=extrema_freqs_matrix.shape,
-                                       )
+        self.freqs_num = spectrum_matrix.shape[1]
+
 
     def build_forward(self, frequencies, batch_size, indices):
 
@@ -785,10 +612,13 @@ class NonparametricOptimizer(object):
             indices=tf.expand_dims(indices, axis=1)
         )
 
-        extrema_freqs = tf.gather_nd(
-            params=self.extrema_freqs_matrix,
+        valid_freqs_counts = tf.gather_nd(
+            params=self.valid_freqs_counts_matrix,
             indices=tf.expand_dims(indices, axis=1)
         )
+
+        true_freqs_num = tf.reduce_max(valid_freqs_counts)
+        inputs = inputs[:, :true_freqs_num, :]
 
         impedances, representation_mu = self.build_forward(
             frequencies=inputs[:,:,0],
@@ -796,23 +626,25 @@ class NonparametricOptimizer(object):
             indices=indices
         )
 
-        masks = tf.gather_nd(
-            params=self.mask_matrix,
-            indices=tf.expand_dims(indices, axis=1)
+        masks_logical = tf.sequence_mask(
+            lengths=valid_freqs_counts,
+            maxlen=true_freqs_num,
         )
 
-        _, variances = tf.nn.weighted_moments(inputs[:,:,1:],axes=[1],frequency_weights=tf.expand_dims(masks, axis=2), keep_dims=False)
+        masks_float = tf.cast(masks_logical, dtype=tf.float32)
+
+        _, variances = tf.nn.weighted_moments(inputs[:,:,1:],axes=[1],frequency_weights=tf.expand_dims(masks_float, axis=2), keep_dims=False)
         std_devs = 1.0/(0.02 + tf.sqrt(variances))
 
-        reconstruction_loss = tf.reduce_sum(masks * tf.reduce_mean(tf.square(
+        reconstruction_loss = tf.reduce_sum(masks_float * tf.reduce_mean(tf.square(
             tf.expand_dims(std_devs, axis=1) * (impedances - inputs[:,:,1:]))
-            , axis=[2]), axis=[1]) / tf.reduce_sum(masks, axis=[1])
+            , axis=[2]), axis=[1]) / tf.reduce_sum(masks_float, axis=[1])
 
         # simplicity loss
         rs = representation_mu[:, 2:2 + 3]
         l_half = tf.square(tf.reduce_sum(tf.exp(.5 * rs), axis=1))
         l_1 = tf.reduce_sum(tf.exp(rs), axis=1)
-        simplicity_loss = tf.reduce_mean(l_half + l_1)
+        simplicity_loss = (l_half + l_1)
         complexity_metric = tf.reduce_mean(l_half / (1e-10 + l_1))
 
         # sensible_phi loss
@@ -825,7 +657,7 @@ class NonparametricOptimizer(object):
         phi_warburg = tf.sigmoid(representation_mu[:, 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs])
         phi_zarcs = tf.sigmoid(representation_mu[:, first_mark:second_mark])
 
-        sensible_phi_loss = tf.reduce_mean(
+        sensible_phi_loss = (
             tf.square(tf.nn.relu(0.4 - phi_warburg)) +
             tf.square(tf.nn.relu(phi_warburg - 0.6)) +
             tf.nn.relu(0.5 - phi_zarcs[:, 1]) +
@@ -838,18 +670,26 @@ class NonparametricOptimizer(object):
         first_wc_index = 2 + number_of_zarcs + 3
         wcs = representation_mu[:, first_wc_index:first_wc_index + number_of_zarcs]
 
-        ordering_loss = tf.reduce_mean(
+        frequencies = inputs[:, :, 0]
+        max_frequencies = tf.gather_nd(
+            params=frequencies,
+            indices=tf.stack((tf.range(batch_size), valid_freqs_counts - 1), axis=1)
+        )
+
+        ordering_loss = (
             tf.nn.relu(wcs[:, 0] - wcs[:, 1]) +
             tf.nn.relu(wcs[:, 1] - wcs[:, 2]) +
-            tf.nn.relu(wcs[:, 2] - extrema_freqs[:, 1]) +
-            tf.nn.relu(extrema_freqs[:, 0] - wcs[:, 0])
+            tf.nn.relu(wcs[:, 2] - max_frequencies) +
+            tf.nn.relu(frequencies[:, 0] - wcs[:, 0])
         )
         prior_mu_ = tf.expand_dims(prior_mu, axis=0)
         prior_log_sigma_sq_ = tf.expand_dims(prior_log_sigma_sq, axis=0)
 
         nll_loss = \
          0.5 * tf.reduce_mean(
-                tf.exp(- prior_log_sigma_sq_) * tf.square(representation_mu-prior_mu_))
+                tf.exp(- prior_log_sigma_sq_) * tf.square(representation_mu-prior_mu_),
+                axis=1
+         )
 
         loss = tf.stop_gradient(reconstruction_loss) * (sensible_phi_loss * self.sensible_phi_coeff +nll_loss * self.nll_coeff + simplicity_loss * self.simplicity_coeff + ordering_loss * self.ordering_coeff) + reconstruction_loss
         if trainable:
@@ -887,16 +727,19 @@ class NonparametricOptimizer(object):
             indices=indices
         )
 
-        masks = tf.gather_nd(
-            params=self.mask_matrix,
+        valid_freqs_counts = tf.gather_nd(
+            params=self.valid_freqs_counts_matrix,
             indices=tf.expand_dims(indices, axis=1)
         )
+
+
+
 
         return {
             'frequencies':  frequencies,
             'in_impedances':  inputs[:,:,1:],
             'out_impedances': impedances,
-            'masks':  masks,
+            'valid_freqs_counts':  valid_freqs_counts,
             'parameters':  z
 
         }
@@ -904,12 +747,134 @@ class NonparametricOptimizer(object):
 
 
 
+def run_optimizer_on_data(cleaned_data, args, chunk_num):
+
+    number_of_zarcs = 3
+    number_of_params = 1 + 1 + number_of_zarcs + 1 + 1 + 1 + number_of_zarcs + 1 + number_of_zarcs + 1 + 1
+
+    spectrum_count = len(cleaned_data)
+    if spectrum_count == 0:
+        return []
 
 
 
+    max_len = numpy.max([len(cd[0]) for cd in cleaned_data])
 
 
-def finetune_test_data_with_adam(args):
+
+    # must be kept in sync
+    all_spectra = numpy.zeros(shape=(spectrum_count, max_len, 3), dtype=numpy.float32)
+    all_ids = []
+    all_valid_freqs_counts = numpy.zeros(shape=(spectrum_count), dtype=numpy.int32)
+    all_params = numpy.zeros(shape=(spectrum_count, number_of_params), dtype=numpy.float32)
+
+    for main_index in range(spectrum_count):
+        freqs = cleaned_data[main_index][0]
+        imps = cleaned_data[main_index][1]
+        n_arr = len(freqs)
+
+        all_spectra[main_index, :n_arr, 0] = freqs
+        all_spectra[main_index, :n_arr, 1:] = imps
+
+        all_ids.append(cleaned_data[main_index][-1])
+        all_valid_freqs_counts[main_index] = n_arr
+        all_params[main_index, :] = cleaned_data[main_index][3]
+
+    # build the computation graph
+    batch_size = tf.placeholder(dtype=tf.int32)
+    prior_mu, prior_log_sigma_sq = Prior()
+
+    indices = tf.placeholder(shape=[None], dtype=tf.int32)
+
+    model = NonparametricOptimizer(
+        parameter_matrix=all_params,
+        spectrum_matrix=all_spectra,
+        valid_freqs_counts_matrix=all_valid_freqs_counts,
+    )
+
+    loss, train_step, impedances, representation_mu, my_reconstruction_loss = \
+        model.optimize_direct(
+            indices=indices, prior_mu=prior_mu,
+            prior_log_sigma_sq=prior_log_sigma_sq,
+            learning_rate=args['learning_rate'],
+            batch_size=batch_size
+        )
+
+    indexed_matrices = \
+        model.get_indexed_matrices(
+            indices=indices,
+            batch_size=batch_size
+        )
+
+    step = tf.train.get_or_create_global_step()
+    increment_step = step.assign_add(1)
+
+    # for now, batch_size is just the total size
+
+    actual_batch_size = spectrum_count
+    full_index_list = range(actual_batch_size)
+    if actual_batch_size < chunk_num:
+        full_index_lists = numpy.array([full_index_list])
+    else:
+        num_chunks = 1 + int(actual_batch_size / chunk_num)
+        full_index_lists = numpy.array_split(full_index_list, num_chunks)
+
+    results = []
+    for full_index_list in full_index_lists:
+        with tf.Session() as sess:
+            sess.run(tf.global_variables_initializer())
+
+            while True:
+                current_step = sess.run(step)
+                if current_step >= 1001:
+                    print('Training complete.')
+                    break
+
+                loss_value, _, step_value = \
+                    sess.run([loss, train_step, increment_step],
+                             feed_dict={
+                                 batch_size: len(full_index_list),
+                                 indices: full_index_list,
+                                 model.sensible_phi_coeff: args['sensible_phi_coeff'],
+                                 model.simplicity_coeff: args['simplicity_coeff'],
+                                 model.nll_coeff: args['nll_coeff'],
+                                 model.ordering_coeff: args['ordering_coeff']
+                             })
+
+                if (current_step % 100) == 0:
+                    print('iteration {}, total loss {}'.format(current_step, loss_value))
+                if current_step == 1000:
+                    freq_val, in_val, out_val, valid_freqs_counts_val, param_val = \
+                        sess.run([
+                            indexed_matrices['frequencies'],
+                            indexed_matrices['in_impedances'],
+                            indexed_matrices['out_impedances'],
+                            indexed_matrices['valid_freqs_counts'],
+                            indexed_matrices['parameters'],
+                        ],
+                            feed_dict={
+                                batch_size: len(full_index_list),
+                                indices: full_index_list,
+                            })
+
+                    ids_val = [all_ids[ind] for ind in full_index_list]
+
+                    for ind in range(len(full_index_list)):
+                        results.append(
+                            (
+                                freq_val[ind, :valid_freqs_counts_val[ind]],
+                                in_val[ind, :valid_freqs_counts_val[ind], :],
+                                out_val[ind, :valid_freqs_counts_val[ind], :],
+                                param_val[ind, :],
+                                ids_val[ind]
+                            )
+                        )
+
+    return results
+
+
+
+def finetune(args):
     names_of_paths = {
         'fra': {
             'database': "database.file",
@@ -930,28 +895,6 @@ def finetune_test_data_with_adam(args):
     name_of_paths = names_of_paths[args.file_types]
 
 
-    batch_size = tf.placeholder(dtype=tf.int32)
-    prior_mu, prior_log_sigma_sq = Prior()
-    frequencies = tf.placeholder(shape=[None, None], dtype=tf.float32)
-    input_impedances = tf.placeholder(shape=[None, None, 2], dtype=tf.float32)
-
-    number_of_zarcs = 3
-    number_of_params = 1 + 1 + number_of_zarcs + 1 + 1 + 1 + number_of_zarcs + 1 + number_of_zarcs + 1 + 1
-    params = tf.placeholder(shape=[None, number_of_params], dtype=tf.float32)
-
-    m = tf.placeholder(shape=[None, number_of_params], dtype=tf.float32)
-    v = tf.placeholder(shape=[None, number_of_params], dtype=tf.float32)
-    model = NonparametricOptimizerAdam(num_encoded=number_of_params, beta1=args.adam_beta1, beta2=args.adam_beta2,
-                                       epsilon=args.adam_epsilon)
-
-    adam_time = tf.placeholder(dtype=tf.float32)
-    loss, updates, updates_m,updates_v, impedances = \
-        model.optimize_direct(
-            current_params=params, current_m=m,current_v=v, frequencies=frequencies, in_impedances=input_impedances,  prior_mu=prior_mu,
-                              prior_log_sigma_sq=prior_log_sigma_sq,
-                              learning_rate=6e-3, batch_size=batch_size, adam_time = adam_time)
-
-
 
     if args.use_compressed:
         with open(os.path.join(".", "RealData", name_of_paths['results_compressed']), 'rb') as f:
@@ -961,85 +904,25 @@ def finetune_test_data_with_adam(args):
             results = pickle.load(f)
 
     cleaned_data = sorted(results, key=lambda x: len(x[0]))
+    results = run_optimizer_on_data(
+        cleaned_data=cleaned_data,
+        args={
+            'learning_rate':args.learning_rate,
+            'sensible_phi_coeff':args.sensible_phi_coeff,
+            'simplicity_coeff':args.simplicity_coeff,
+            'nll_coeff': args.nll_coeff,
+            'ordering_coeff':args.ordering_coeff
 
-    grouped_data = []
+        },
+        chunk_num=args.chunk_num*32
+    )
 
-    current_group = []
-
-    max_batch_size = 5*128
-    for freq, in_z, out_z, params_val, file_id in cleaned_data:
-        current_len = len(freq)
-        if len(current_group) == 0:
-            current_group.append((freq, in_z, out_z, params_val, file_id))
-        elif current_len == len(current_group[0][0]):
-            current_group.append((freq, in_z, out_z, params_val, file_id))
-            if len(current_group) == max_batch_size:
-                grouped_data.append(copy.deepcopy(current_group))
-                current_group = []
-        else:
-            grouped_data.append(copy.deepcopy(current_group))
-            current_group = [(freq, in_z, out_z, params_val, file_id)]
-
-    if not len(current_group) == 0:
-        grouped_data.append(current_group)
-
-
-    grouped_data_numpy = []
-    for g in grouped_data:
-        batch_len = len(g)
-        batch_frequecies = numpy.array([x[0] for x in g])
-        batch_in_impedances = numpy.array([x[1] for x in g])
-        batch_out_impedances = numpy.array([x[2] for x in g])
-
-        batch_params = numpy.array([x[3] for x in g])
-        batch_file_ids = numpy.array([x[4] for x in g])
-        # initialize to 0.
-        batch_m = numpy.array([numpy.zeros(shape=number_of_params, dtype=numpy.float32) for _ in g])
-        batch_v = numpy.array([numpy.zeros(shape=number_of_params, dtype=numpy.float32) for _ in g])
-
-        grouped_data_numpy.append((batch_len, batch_frequecies, batch_in_impedances, batch_out_impedances, batch_params, batch_m,batch_v, batch_file_ids))
-
-
-    with tf.Session() as sess:
-        for j in range(args.total_steps):
-            total_loss = 0.0
-            for i in range(len(grouped_data_numpy)):
-                batch_len, batch_frequecies, batch_in_impedances, _, batch_params, batch_m,batch_v, batch_file_ids = grouped_data_numpy[i]
+    j = 1000
+    with open(os.path.join(".", "RealData", name_of_paths['finetuned'].format(j)), 'wb') as f:
+        pickle.dump(results, f, pickle.HIGHEST_PROTOCOL)
 
 
 
-                loss_value, out_impedance, new_params_value, new_m_values, new_v_values = \
-                    sess.run(
-                        [ loss, impedances, updates, updates_m, updates_v],
-                        feed_dict={batch_size: batch_len,
-                                   model.sensible_phi_coeff: args.sensible_phi_coeff,
-                                   model.simplicity_coeff: args.simplicity_coeff,
-                                   model.nll_coeff: args.nll_coeff,
-                                   model.ordering_coeff: args.ordering_coeff,
-                                   frequencies: batch_frequecies,
-                                   input_impedances: batch_in_impedances,
-                                   params: batch_params,
-                                   m:batch_m,
-                                   v:batch_v,
-                                   adam_time:float(j+1)
-                                   })
-                total_loss += loss_value
-                grouped_data_numpy[i] = (batch_len, batch_frequecies, batch_in_impedances, out_impedance, new_params_value,new_m_values, new_v_values, batch_file_ids)
-
-            print('iteration {}, total loss {}.'.format(j, total_loss))
-
-            if j % args.log_every == 0:
-                new_results = []
-                for i in range(len(grouped_data_numpy)):
-                    batch_len, batch_frequecies, batch_in_impedances, batch_out_impedances, batch_params, _, _, batch_file_ids= \
-                        grouped_data_numpy[i]
-
-
-                    for k in range(len(batch_frequecies)):
-                        new_results.append((batch_frequecies[k], batch_in_impedances[k],batch_out_impedances[k], batch_params[k], batch_file_ids[k]))
-
-                with open(os.path.join(".", "RealData", name_of_paths['finetuned'].format(j)), 'wb') as f:
-                    pickle.dump(new_results, f, pickle.HIGHEST_PROTOCOL)
 
 
 
@@ -1231,7 +1114,7 @@ def split_train_test_data(args, file_types=None):
 
     return split
 
-def train_on_all_data(args):
+def train(args):
     print('args.new_logdir = {}.'.format(args.new_logdir))
     if args.new_logdir:
         logdir_new = args.logdir + 'NEW_Fast'
@@ -1241,7 +1124,7 @@ def train_on_all_data(args):
     random.seed(a=args.seed)
     number_of_zarcs = 3
     number_of_params = 1 + 1 + number_of_zarcs + 1 + 1 + 1 + number_of_zarcs + 1 + number_of_zarcs + 1 + 1
-    batch_size = tf.placeholder(dtype=tf.int32)
+    batch_size = args.batch_size
     prior_mu, prior_log_sigma_sq = Prior()
 
 
@@ -1262,7 +1145,11 @@ def train_on_all_data(args):
         if len(log_freq) < 10:
             continue
 
-        for i_negs in range(min(len(log_freq), negs+5)):
+
+        # this determines how many slightly different copies of the spectra we use for training.
+        # i_negs is the number of samples we remove.
+        # we remove between 0 and negs+5 (or all the frequencies if negs + 5 is more.)
+        for i_negs in range(min(n_freq, negs+5)):
             log_freq_negs = log_freq[:n_freq-i_negs]
             re_z_negs = re_z[:n_freq-i_negs]
             im_z_negs = im_z[:n_freq-i_negs]
@@ -1272,6 +1159,7 @@ def train_on_all_data(args):
 
 
     cleaned_data_lens = [len(c[0]) for c in cleaned_data]
+
 
     with open(os.path.join(".", "RealData", "database_eis.file"), 'rb') as f:
         data_eis = pickle.load(f)
@@ -1301,44 +1189,54 @@ def train_on_all_data(args):
 
     cleaned_data_lens_eis = [len(c[0]) for c in cleaned_data_eis]
 
+    max_freq_num = max(numpy.max(cleaned_data_lens),numpy.max(cleaned_data_lens_eis))
 
-    freqs_num = tf.placeholder(dtype=tf.int32)
-    valid_freqs_counts = tf.placeholder(shape=[None], dtype=tf.int32)
-    frequencies = tf.placeholder(shape=[None, None], dtype=tf.float32)
 
-    input_impedances = tf.placeholder(shape=[None, None, 2], dtype=tf.float32)
+    spectrum_count = len(cleaned_data_lens)
 
-    frequencies_synth, frequencies_number_synth = Fake_frequency(batch_size)
-
-    number_of_prior_zarcs_synth = args.number_of_prior_zarcs
-    number_of_prior_params_synth = 1 + 1 + number_of_prior_zarcs_synth + 1 + 1 + 1 + number_of_prior_zarcs_synth + 1 + number_of_prior_zarcs_synth + 1 + 1
-
-    mu_synth_val, log_square_sigma_synth_val = HardPrior(number_of_zarcs=number_of_prior_zarcs_synth)
-
-    mu_synth, log_square_sigma_synth = tf.placeholder(shape=number_of_prior_params_synth , dtype=tf.float32),tf.placeholder(shape=number_of_prior_params_synth , dtype=tf.float32)
-    epsilon_synth = tf.random_uniform(shape=[batch_size, number_of_prior_params_synth], minval=-1., maxval=1., dtype=tf.float32)
-    params_synth = mu_synth + tf.exp(0.5 * log_square_sigma_synth) * epsilon_synth
-
-    masks_synth = tf.to_double(
-        tf.multinomial(tf.log(args.batch_size*[[1., 1.]]), number_of_prior_zarcs_synth))
+    full_data_fra = numpy.zeros(shape=(spectrum_count,max_freq_num,3), dtype=numpy.float32)
+    full_data_freqs_counts = numpy.zeros(shape=(spectrum_count), dtype=numpy.int32)
 
 
 
-    impedances_synth = HardImpedanceModel(params_synth, masks_synth, frequencies_synth, batch_size=batch_size,
-                                    number_of_zarcs=number_of_prior_zarcs_synth)
+    for ind in range(spectrum_count):
+        full_data_freqs_counts[ind] = len(cleaned_data[ind][0])
+        for j in range(3):
+            full_data_fra[ind,:full_data_freqs_counts[ind],j] = numpy.array(cleaned_data[ind][j])
 
-    epsilon_scale_synth = .1 * tf.random_uniform(shape=[batch_size], minval=-2., maxval=2., dtype=tf.float32)
-    epsilon_observation_noise_synth = tf.reshape(tf.constant([1., 1.]), [1, 1, 2]) * 0.001 * tf.random_uniform(
-        shape=[batch_size, frequencies_number_synth[0], 2], minval=-2., maxval=2., dtype=tf.float32)
-    epsilon_frequency_noise_synth = 0.0001 * tf.random_uniform(shape=[batch_size, frequencies_number_synth[0]], minval=-2., maxval=2., dtype=tf.float32)
-    epsilon_frequency_translate_synth = .5 * tf.random_uniform(shape=[batch_size], minval=-2., maxval=2., dtype=tf.float32)
+    dataset_fra = tf.data.Dataset.from_tensor_slices((full_data_fra, full_data_freqs_counts))
 
-    squared_impedances_synth = impedances_synth[:, :, 0] ** 2 + impedances_synth[:, :, 1] ** 2
-    maxes_synth = epsilon_scale_synth - 0.5 * tf.log(0.00001 + tf.reduce_max(squared_impedances_synth, axis=1))
-    pure_impedances_synth = tf.exp(tf.expand_dims(tf.expand_dims(maxes_synth, axis=1), axis=2)) * impedances_synth
 
-    noisy_impedances_synth = pure_impedances_synth + epsilon_observation_noise_synth
-    noisy_frequencies_synth = frequencies_synth + epsilon_frequency_noise_synth - tf.expand_dims(epsilon_frequency_translate_synth, axis=1)
+    spectrum_count_eis = len(cleaned_data_lens_eis)
+
+    full_data_eis = numpy.zeros(shape=(spectrum_count_eis, max_freq_num, 3), dtype=numpy.float32)
+    full_data_freqs_counts_eis = numpy.zeros(shape=(spectrum_count_eis), dtype=numpy.int32)
+    for ind in range(spectrum_count_eis):
+        full_data_freqs_counts_eis[ind] = len(cleaned_data_eis[ind][0])
+        for j in range(3):
+            full_data_eis[ind, :full_data_freqs_counts_eis[ind], j] = numpy.array(cleaned_data_eis[ind][j])
+
+    dataset_eis = tf.data.Dataset.from_tensor_slices((full_data_eis, full_data_freqs_counts_eis))
+
+    dataset= tf.data.experimental.sample_from_datasets(
+        datasets=(
+            dataset_fra.apply(tf.data.experimental.shuffle_and_repeat(buffer_size=10000)),
+            dataset_eis.apply(tf.data.experimental.shuffle_and_repeat(buffer_size=10000))
+        ),
+    )
+
+    dataset= dataset.batch(args.batch_size)
+    iterator = dataset.make_one_shot_iterator()
+    inputs_fresh, valid_freqs_counts = iterator.get_next()
+
+
+    frequencies = inputs_fresh[:,:,0]
+
+    input_impedances = inputs_fresh[:,:,1:]
+
+
+
+
 
 
     epsilon_scale = .1 * tf.random_uniform(shape=[batch_size], minval=-2., maxval=2., dtype=tf.float32)
@@ -1348,17 +1246,17 @@ def train_on_all_data(args):
 
     masks_logical = tf.sequence_mask(
         lengths=valid_freqs_counts,
-        maxlen=freqs_num,
+        maxlen=max_freq_num,
     )
 
-    masked_squared_impedances = tf.where(masks_logical, squared_impedances, tf.ones_like(squared_impedances)*-tf.float32.max )
+    masked_squared_impedances = tf.where(masks_logical, squared_impedances, tf.ones_like(squared_impedances)*(-tf.float32.max) )
 
     maxes = epsilon_scale -0.5 * tf.log(0.00001 + tf.reduce_max(masked_squared_impedances, axis=1))
     pure_impedances = tf.exp(tf.expand_dims(tf.expand_dims(maxes, axis=1), axis=2)) * input_impedances
 
     max_frequencies = tf.gather_nd(
         params=frequencies,
-        indices=tf.stack((tf.range(batch_size), valid_freqs_counts), axis=1)
+        indices=tf.stack((tf.range(batch_size), valid_freqs_counts-1), axis=1)
     )
 
     avg_freq = .5 * (frequencies[:, 0] + max_frequencies) + epsilon_frequency_translate
@@ -1372,7 +1270,7 @@ def train_on_all_data(args):
     loss, zero_ops, accum_ops, train_step, test_ops, impedances, representation_mu, my_reconstruction_loss = \
         model.optimize_direct(inputs=inputs,
                               valid_freqs_counts=valid_freqs_counts,
-                              freqs_num=freqs_num,
+                              freqs_num=max_freq_num,
                               prior_mu=prior_mu,
                               prior_log_sigma_sq=prior_log_sigma_sq,
                               learning_rate=args.learning_rate,
@@ -1384,32 +1282,14 @@ def train_on_all_data(args):
 
     reconstruction_loss_avg = 1.0
 
+
+
+
     with initialize_session(args.logdir, seed=args.seed) as (sess, saver):
 
-        groupby = GroupBy()
-
-        for i in range(len(cleaned_data_lens)):
-            groupby.record(cleaned_data_lens[i], i)
 
 
-        indecies_getter = []
-        indecies_numbers = []
-        for k in groupby.data.keys():
-            if len(groupby.data[k]) > 1:
-                indecies_getter.append(GetFresh(list_of_indecies=groupby.data[k]))
-                indecies_numbers.append(float(len(groupby.data[k])))
 
-        groupby_eis = GroupBy()
-
-        for i in range(len(cleaned_data_lens_eis)):
-            groupby_eis.record(cleaned_data_lens_eis[i], i)
-
-        indecies_getter_eis = []
-        indecies_numbers_eis = []
-        for k in groupby_eis.data.keys():
-            if len(groupby_eis.data[k]) > 1:
-                indecies_getter_eis.append(GetFresh(list_of_indecies=groupby_eis.data[k]))
-                indecies_numbers_eis.append(float(len(groupby_eis.data[k])))
 
         while True:
             current_step = sess.run(step)
@@ -1429,84 +1309,13 @@ def train_on_all_data(args):
 
             for count in range(args.virtual_batches):
 
-                prob_choose_real = args.prob_choose_real
-                chose_real_data = random.choices([True, False], weights=[prob_choose_real, 1.-prob_choose_real])[0]
-                if chose_real_data:
-                    source = 'real'
-                    prob_choose_fra = 0.5
-                    chose_fra_data = random.choices([True, False], weights=[prob_choose_fra, 1. - prob_choose_fra])[
-                        0]
-                    if chose_fra_data:
-                        index_meta = random.choices(range(len(indecies_numbers)), weights=indecies_numbers)[0]
-                        batch_indecies = indecies_getter[index_meta].get(args.batch_size)
-                        lens = [cleaned_data_lens[ind] for ind in batch_indecies]
-
-                        min_len = min(lens)
-                        my_freqs = numpy.empty(shape=(len(batch_indecies), min_len), dtype=numpy.float32)
-                        my_imps = numpy.empty(shape=(len(batch_indecies), min_len, 2), dtype=numpy.float32)
-                        for i in range(len(batch_indecies)):
-                            f, re_z,im_z = cleaned_data[batch_indecies[i]]
-                            my_freqs[i,:] = f[:min_len]
-                            my_imps[i,:,0] = re_z[:min_len]
-                            my_imps[i,:,1] = im_z[:min_len]
-
-
-                        actual_batch_size = len(batch_indecies)
-
-                    else:
-                        index_meta = random.choices(range(len(indecies_numbers_eis)), weights=indecies_numbers_eis)[0]
-                        batch_indecies = indecies_getter_eis[index_meta].get(args.batch_size)
-                        lens = [cleaned_data_lens_eis[ind] for ind in batch_indecies]
-
-                        min_len = min(lens)
-                        my_freqs = numpy.empty(shape=(len(batch_indecies), min_len), dtype=numpy.float32)
-                        my_imps = numpy.empty(shape=(len(batch_indecies), min_len, 2), dtype=numpy.float32)
-                        for i in range(len(batch_indecies)):
-                            f, re_z, im_z = cleaned_data_eis[batch_indecies[i]]
-                            my_freqs[i, :] = f[:min_len]
-                            my_imps[i, :, 0] = re_z[:min_len]
-                            my_imps[i, :, 1] = im_z[:min_len]
-
-                        actual_batch_size = len(batch_indecies)
-
-                else:
-                    source = 'fake'
-
-                    prior_index = random.randrange(len(mu_synth_val))
-
-                    res = sess.run([noisy_frequencies_synth,
-                                    noisy_impedances_synth], {batch_size:args.batch_size,
-                                                               mu_synth:mu_synth_val[prior_index,:],
-                                                               log_square_sigma_synth:log_square_sigma_synth_val[prior_index,:]})
-                    my_freqs = res[0]
-                    my_imps = res[1]
-
-                    actual_batch_size = args.batch_size
-
-                sh = my_freqs.shape
-                num_freqs = sh[1]
-                num_wanted_freqs = num_freqs + args.dummy_frequencies
-                my_full_freqs = numpy.zeros(shape=(sh[0], num_wanted_freqs),dtype=numpy.float32)
-                my_full_freqs[:, :num_freqs] = my_freqs
-
-                my_full_imps = numpy.zeros(shape=(sh[0], num_wanted_freqs,2), dtype=numpy.float32)
-                my_full_imps[:, :num_freqs,:] = my_imps
-
-
-                my_valid_freqs_counts = numpy.zeros(shape=(sh[0]),dtype=numpy.float32)
-                my_valid_freqs_counts[:] = num_freqs * numpy.ones(shape=(sh[0]), dtype=numpy.float32)
 
 
 
                 if count < args.virtual_batches - 1:
                     summary, reconstruction_loss_value, loss_value, _, test = \
                         sess.run([model.merger, my_reconstruction_loss, loss, accum_ops, test_ops],
-                                 feed_dict={batch_size: actual_batch_size,
-                                            freqs_num:num_wanted_freqs,
-                                            frequencies: my_full_freqs,
-                                            input_impedances: my_full_imps,
-                                            valid_freqs_counts: my_valid_freqs_counts,
-                                            model.dropout: args.dropout,
+                                 feed_dict={model.dropout: args.dropout,
                                             model.sensible_phi_coeff: args.sensible_phi_coeff,
                                             model.simplicity_coeff: args.simplicity_coeff,
                                             model.nll_coeff: args.nll_coeff,
@@ -1514,37 +1323,41 @@ def train_on_all_data(args):
 
 
                 else:
+                    debugging = False
+                    if debugging:
+                        summary, reconstruction_loss_value, loss_value, \
+                        _, test, step_value, freq, in_impedance, out_impedance, \
+                        vfreq_val, mask_val\
+                            = \
+                            sess.run([model.merger, my_reconstruction_loss, loss,\
+                                      train_step, test_ops, increment_step ,pure_frequencies, pure_impedances, impedances,\
+                                      valid_freqs_counts, tf.cast(masks_logical, dtype=tf.float32)],
+                                     feed_dict={
+                                                model.dropout: args.dropout,
+                                                model.sensible_phi_coeff: args.sensible_phi_coeff,
+                                                model.simplicity_coeff: args.simplicity_coeff,
+                                                model.nll_coeff: args.nll_coeff,
+                                                model.ordering_coeff:  args.ordering_coeff})
 
-                    summary, reconstruction_loss_value, loss_value, _, test, step_value, freq, in_impedance, out_impedance = \
-                        sess.run([model.merger, my_reconstruction_loss, loss, train_step, test_ops, increment_step ,pure_frequencies, pure_impedances, impedances],
-                                 feed_dict={batch_size: actual_batch_size,
-                                            freqs_num: num_wanted_freqs,
-                                            frequencies: my_full_freqs,
-                                            input_impedances: my_full_imps,
-                                            model.dropout: args.dropout,
-                                            valid_freqs_counts: my_valid_freqs_counts,
-                                            model.sensible_phi_coeff: args.sensible_phi_coeff,
-                                            model.simplicity_coeff: args.simplicity_coeff,
-                                            model.nll_coeff: args.nll_coeff,
-                                            model.ordering_coeff:  args.ordering_coeff})
+                        print(vfreq_val)
+                        for ind in range(len(vfreq_val)):
+                            print([mask_val[ind, vfreq_val[ind]+i] for i in [-1,0,1]])
+                        plt.contourf(mask_val)
+                        plt.show()
 
-                    if args.test_fake_data or (step_value % (2 * args.log_every) == 0 and args.visuals):
-                        for i in range(min(3, actual_batch_size)):
-                            fig, ax = plt.subplots(nrows=2, ncols=1)
 
-                            for row_i in range(len(ax)):
-                                row = ax[row_i]
-                                if row_i == 1:
-                                    mult = -1.
-                                else:
-                                    mult = 1.
-                                row.scatter(freq[i],
-                                            mult * in_impedance[i, :, row_i])
-                                row.plot(freq[i],
-                                         mult * out_impedance[i, :, row_i])
 
-                            plt.savefig(os.path.join(logdir_new, 'Progress_Plot_{}_{}_{}.png'.format(source, step_value, i)))
-                            plt.close(fig)
+                    else:
+                        summary, reconstruction_loss_value, loss_value, _, test, step_value, freq, in_impedance, out_impedance = \
+                            sess.run([model.merger, my_reconstruction_loss, loss, train_step, test_ops, increment_step ,pure_frequencies, pure_impedances, impedances],
+                                     feed_dict={
+                                                model.dropout: args.dropout,
+                                                model.sensible_phi_coeff: args.sensible_phi_coeff,
+                                                model.simplicity_coeff: args.simplicity_coeff,
+                                                model.nll_coeff: args.nll_coeff,
+                                                model.ordering_coeff:  args.ordering_coeff})
+
+
                 reconstruction_loss_avg = reconstruction_loss_avg * .99 + reconstruction_loss_value * (1. - .99)
 
                 summaries.append(summary)
@@ -1682,7 +1495,85 @@ def deparameterized_params(params):
 
 
 
-def run_on_real_data(args):
+def run_through_trained_model(cleaned_data, inverse_model_params, seed=None, chunk_num=32):
+    number_of_zarcs = 3
+    number_of_params = 1 + 1 + number_of_zarcs + 1 + 1 + 1 + number_of_zarcs + 1 + number_of_zarcs + 1 + 1
+
+    batch_size = tf.placeholder(dtype=tf.int32)
+    prior_mu, prior_log_sigma_sq = Prior()
+
+    cleaned_data_lens = [len(c[0]) for c in cleaned_data]
+    spectrum_count = len(cleaned_data_lens)
+
+    if spectrum_count == 0:
+        return []
+
+    max_freq_num = numpy.max(cleaned_data_lens)
+
+    full_data = numpy.zeros(shape=(spectrum_count, max_freq_num, 3), dtype=numpy.float32)
+    full_data_freqs_counts = numpy.zeros(shape=(spectrum_count), dtype=numpy.int32)
+    full_data_ids = []
+    for ind in range(spectrum_count):
+        full_data_freqs_counts[ind] = len(cleaned_data[ind][0])
+        full_data_ids.append(cleaned_data[ind][-1])
+        for j in range(3):
+            full_data[ind, :full_data_freqs_counts[ind], j] = numpy.array(cleaned_data[ind][j])
+
+    inputs = tf.placeholder(shape=[None, max_freq_num, 3], dtype=tf.float32)
+    valid_freqs_counts = tf.placeholder(shape=[None], dtype=tf.int32)
+
+    model = ParameterVAE(
+        kernel_size=inverse_model_params['kernel_size'],
+        conv_filters=inverse_model_params['conv_filters'],
+        num_conv=inverse_model_params['num_conv'],
+        trainable=False,
+        num_encoded=number_of_params)
+
+    impedances, representation_mu = \
+            model.optimize_direct(inputs=inputs,
+                                  valid_freqs_counts=valid_freqs_counts,
+                                  freqs_num=max_freq_num,
+                                  prior_mu=prior_mu,
+                                  prior_log_sigma_sq=prior_log_sigma_sq,
+                                  batch_size=batch_size,
+                                  create_loss=False)
+
+    results = []
+    with initialize_session(logdir=inverse_model_params['logdir'], seed=seed) as (sess, saver):
+        actual_batch_size = spectrum_count
+        full_index_list = range(actual_batch_size)
+        if actual_batch_size < chunk_num:
+            full_index_lists = numpy.array([full_index_list])
+        else:
+            num_chunks = 1 + int(actual_batch_size / chunk_num )
+            full_index_lists = numpy.array_split(full_index_list, num_chunks)
+
+        for list_of_ind in full_index_lists:
+            out_impedance, representation_mu_value = \
+                sess.run([impedances, representation_mu],
+                         feed_dict={
+                             batch_size: len(list_of_ind),
+                             inputs: full_data[list_of_ind],
+                             valid_freqs_counts: full_data_freqs_counts[list_of_ind],
+                             model.dropout: 0.0,
+                         })
+
+            for s in range(len(list_of_ind)):
+                ind = list_of_ind[s]
+                results.append(
+                    (
+                        full_data[ind, :full_data_freqs_counts[ind], 0],
+                        full_data[ind, :full_data_freqs_counts[ind], 1:],
+                        out_impedance[s, :full_data_freqs_counts[ind], :],
+                        representation_mu_value[s, :],
+                        full_data_ids[ind]
+
+                    )
+                )
+
+    return results
+
+def run_inverse_model(args):
     names_of_paths = {
         'fra':{
             'database':"database.file",
@@ -1698,27 +1589,6 @@ def run_on_real_data(args):
     }
     name_of_paths= names_of_paths[args.file_types]
 
-    random.seed(a=args.seed)
-    batch_size = tf.placeholder(dtype=tf.int32)
-    prior_mu, prior_log_sigma_sq = Prior()
-
-    frequencies = tf.placeholder(shape=[None, None], dtype=tf.float32)
-    input_impedances = tf.placeholder(shape=[None, None,2], dtype=tf.float32)
-
-    inputs = tf.concat([tf.expand_dims(frequencies, axis=2), input_impedances], axis=2)
-
-    number_of_zarcs = 3
-    number_of_params = 1 + 1 + number_of_zarcs + 1 + 1 + 1 + number_of_zarcs + 1 + number_of_zarcs + 1 + 1
-
-    model = ParameterVAE(kernel_size=args.kernel_size, conv_filters=args.conv_filters,
-                          num_conv=args.num_conv, trainable=False, num_encoded=number_of_params)
-
-    loss, impedances, representation_mu, my_reconstruction_loss = \
-        model.optimize_direct( inputs=inputs,prior_mu=prior_mu,
-                                  prior_log_sigma_sq=prior_log_sigma_sq,
-                                  learning_rate=args.learning_rate,
-                                  global_norm_clip=args.global_norm_clip,
-                                  logdir=args.logdir, batch_size=batch_size, trainable=False)
 
     split = split_train_test_data(args)
     with open(os.path.join(".", "RealData", name_of_paths['database']), 'rb') as f:
@@ -1748,56 +1618,20 @@ def run_on_real_data(args):
     with open(os.path.join(".", "RealData", name_of_paths['database_augmented']), 'wb') as f:
         pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
 
-    cleaned_data = sorted(cleaned_data, key=lambda x: len(x[0]))
+    results = run_through_trained_model(
+        cleaned_data=cleaned_data,
+        inverse_model_params={
+            'kernel_size':args.kernel_size,
+            'num_conv': args.num_conv,
+            'conv_filters':args.conv_filters,
+            'logdir':args.logdir,
+        },
+        seed=args.seed,
+        chunk_num=args.chunk_num
+    )
 
-    grouped_data = []
-
-    current_group =[]
-    for freq, re_z, im_z, file_id in cleaned_data:
-        current_len = len(freq)
-        if len(current_group) == 0:
-            current_group.append((freq, re_z, im_z, file_id ))
-        elif current_len == len(current_group[0][0]):
-            current_group.append((freq, re_z,im_z, file_id ))
-            if len(current_group) == 64:
-                grouped_data.append(copy.deepcopy(current_group))
-                current_group = []
-        else:
-            grouped_data.append(copy.deepcopy(current_group))
-            current_group = [(freq, re_z, im_z, file_id )]
-
-    if not len(current_group) == 0:
-        grouped_data.append(current_group)
-
-
-
-    results = []
-    with initialize_session(logdir=args.logdir, seed=args.seed) as (sess, saver):
-        for g in grouped_data:
-            batch_len = len(g)
-            batch_frequecies = numpy.array([x[0] for x in g])
-            batch_impedances =  numpy.array([numpy.stack((x[1], x[2]), axis=1) for x in g])
-            batch_file_ids = numpy.array([x[3] for x in g])
-
-            reconstruction_loss_value, loss_value,out_impedance,in_impedance, freqs, representation_mu_value  = \
-                sess.run([ my_reconstruction_loss,loss, impedances, input_impedances, frequencies, representation_mu],
-                         feed_dict={batch_size: batch_len,
-                                    model.dropout: 0.0,
-                                    model.sensible_phi_coeff: args.sensible_phi_coeff,
-                                    model.simplicity_coeff: args.simplicity_coeff,
-                                    model.nll_coeff: args.nll_coeff,
-                                    model.ordering_coeff: args.ordering_coeff,
-                                    frequencies: batch_frequecies,
-                                    input_impedances: batch_impedances
-                                    })
-
-
-            current_results = [(freqs[index], in_impedance[index],out_impedance[index], representation_mu_value[index], batch_file_ids[index]) for index in range(batch_len)]
-            results += copy.deepcopy(current_results)
-
-
-        with open(os.path.join(".", "RealData", name_of_paths['results']), 'wb') as f:
-            pickle.dump(results, f, pickle.HIGHEST_PROTOCOL)
+    with open(os.path.join(".", "RealData", name_of_paths['results']), 'wb') as f:
+        pickle.dump(results, f, pickle.HIGHEST_PROTOCOL)
 
 
 
@@ -1934,9 +1768,6 @@ def get_cell_id_groups(database):
     return metadata_groups
 
 
-def tally_spectrum_lengths(args):
-    #TODO
-    return
 
 
 def compress_data(args):
@@ -1991,26 +1822,7 @@ def compress_data(args):
         pickle.dump(compressed_database, f, pickle.HIGHEST_PROTOCOL)
 
 
-    '''
-    compressed_result = []
-    compressed_n = args.compressed_num
-    start = 200
-    compressed_ids = []
-    for index in range(compressed_n):
-        compressed_index = min(n - 1, start + int(float(n - 1 - start) / float(compressed_n) * float(index)))
-        print(compressed_index)
-        compressed_result.append(sorted_sorted_results[compressed_index])
-        compressed_ids.append(sorted_sorted_results[compressed_index][-1])
 
-    compressed_database = {}
-    for id in compressed_ids:
-        compressed_database[id] = database[id]
-
-    with open(os.path.join(".", args.data_dir, "results_compressed.file"), 'wb') as f:
-        pickle.dump(compressed_result, f, pickle.HIGHEST_PROTOCOL)
-    with open(os.path.join(".", args.data_dir, "database_compressed.file"), 'wb') as f:
-        pickle.dump(compressed_database, f, pickle.HIGHEST_PROTOCOL)
-    '''
 
 def inspect(args):
     from tensorflow.python.tools import inspect_checkpoint as chkp
@@ -2022,12 +1834,11 @@ def inspect(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', choices=['training_direct', 'run_on_real_data','inspect',
-                                           'train_on_real_data','train_on_real_data_fast',
-                                           'train_on_all_data','finetune_test_data',
-                                           'finetune_test_data_from_prior','finetune_test_data_from_prior_with_adam',
-                                           'finetune_test_data_with_adam','plot_to_scale','compress_data','plot_param_histo'])
-    parser.add_argument('--logdir', required=True)
+    parser.add_argument('--mode', choices=[
+                                    'train',
+                                    'run_inverse_model',
+                                    'finetune'])
+    parser.add_argument('--logdir')
 
     parser.add_argument('--batch_size', type=int, default=16+4)
     parser.add_argument('--virtual_batches', type=int, default=3)
@@ -2045,7 +1856,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--percent_training', type=int, default=1)
 
-    parser.add_argument('--total_steps', type=int, default=1000000)
+    parser.add_argument('--total_steps', type=int, default=250000)
     parser.add_argument('--checkpoint_every', type=int, default=1000)
     parser.add_argument('--log_every', type=int, default=1000)
     parser.add_argument('--dropout', type=float, default=0.1)
@@ -2088,41 +1899,12 @@ if __name__ == '__main__':
     parser.set_defaults(test_fake_data=False)
 
     parser.add_argument('--dummy_frequencies', type=int, default=0)
+    parser.add_argument('--chunk_num', type=int, default=256)
 
     args = parser.parse_args()
-    if args.mode == 'training_direct':
-        training_direct(args)
-    elif args.mode == 'run_on_real_data':
-        run_on_real_data(args)
-
-    elif args.mode == 'inspect':
-        inspect(args)
-
-    elif args.mode == 'train_on_real_data':
-        train_on_real_data(args)
-
-    elif args.mode == 'train_on_real_data_fast':
-        train_on_real_data_fast(args)
-
-    elif args.mode == 'train_on_all_data':
-        train_on_all_data(args)
-    elif args.mode == 'finetune_test_data':
-        finetune_test_data(args)
-
-    elif args.mode == 'finetune_test_data_from_prior':
-        finetune_test_data_from_prior(args)
-
-    elif args.mode == 'finetune_test_data_from_prior_with_adam':
-        finetune_test_data_from_prior_with_adam(args)
-
-    elif args.mode == 'finetune_test_data_with_adam':
-        finetune_test_data_with_adam(args)
-
-    elif args.mode == 'plot_to_scale':
-        plot_to_scale(args)
-
-    elif args.mode == 'compress_data':
-        compress_data(args)
-
-    elif args.mode == 'plot_param_histo':
-        plot_param_histo(args)
+    if args.mode == 'train':
+        train(args)
+    elif args.mode == 'run_inverse_model':
+        run_inverse_model(args)
+    elif args.mode == 'finetune':
+        finetune(args)
