@@ -35,7 +35,7 @@ from EISFittingModelDefinitions import Prior,ParameterVAE, shift_scale_param_ext
 
 
 
-def get_inv_model_results_or_none(spectrum, inv_model):
+def get_inv_model_results_or_none(spectrum, inv_model, inductance, zarc_inductance, num_zarcs):
     '''
 
     returns two values. first is the inv_model_results. second is a bool saying if it existed.
@@ -44,8 +44,9 @@ def get_inv_model_results_or_none(spectrum, inv_model):
     :return:
 
     '''
-    if InverseModelResult.objects.filter(spectrum=spectrum, inv_model=inv_model).exists():
-        for inv_model_res in InverseModelResult.objects.filter(spectrum=spectrum, inv_model=inv_model):
+    query = InverseModelResult.objects.filter(spectrum=spectrum, inv_model=inv_model, inductance=inductance, zarc_inductance=zarc_inductance, num_zarcs=num_zarcs)
+    if query.exists():
+        for inv_model_res in query.all():
             match = True
             for activity_sample in ActivitySample.objects.filter(setting=inv_model_res.activity_setting):
                 if not activity_sample.active == activity_sample.sample.active:
@@ -169,7 +170,11 @@ def import_process_output(args):
         if not spectrum.any_active():
             continue
 
-        _, already_exists = get_inv_model_results_or_none(spectrum, inv_model)
+        _, already_exists = get_inv_model_results_or_none(
+            spectrum, inv_model,
+            inductance=args['inductance'],
+            zarc_inductance=args['zarc_inductance'],
+            num_zarcs=args['num_zarcs'])
         if already_exists:
             continue
 
@@ -200,6 +205,9 @@ def import_process_output(args):
         inverse_model_results = InverseModelResult(
             spectrum=spectrum,
             inv_model=inv_model,
+            inductance=args['inductance'],
+            zarc_inductance=args['zarc_inductance'],
+            num_zarcs=args['num_zarcs'],
             activity_setting=activity_setting,
             shift_scale_parameters=ssp,
             circuit_parameters=cp,
@@ -230,6 +238,9 @@ def import_process_output(args):
             'num_conv': inv_model.num_conv,
             'conv_filters': inv_model.conv_filters,
             'logdir': inv_model.logdir,
+            'inductance' : args['inductance'],
+            'zarc_inductance' : args['zarc_inductance'],
+            'num_zarcs' : args['num_zarcs'],
         },
         seed=args['seed'],
         chunk_num=args['chunk_num']
@@ -273,7 +284,14 @@ def import_process_output(args):
         if not spectrum.any_active():
             continue
 
-        inv_model_result, already_exists = get_inv_model_results_or_none(spectrum, inv_model)
+        inv_model_result, already_exists = get_inv_model_results_or_none(
+            spectrum, inv_model,
+            inductance=args['inductance'],
+            zarc_inductance=args['zarc_inductance'],
+            num_zarcs=args['num_zarcs']
+        )
+
+
         assert already_exists
 
         _, already_exists = get_finetune_results_or_none(inv_model_result, args)
@@ -320,7 +338,10 @@ def import_process_output(args):
             'sensible_phi_coeff': args['sensible_phi_coeff'],
             'simplicity_coeff': args['simplicity_coeff'],
             'nll_coeff': args['nll_coeff'],
-            'ordering_coeff': args['ordering_coeff']
+            'ordering_coeff': args['ordering_coeff'],
+            'inductance': args['inductance'],
+            'zarc_inductance': args['zarc_inductance'],
+            'num_zarcs': args['num_zarcs'],
 
         },
         chunk_num=args['chunk_num'] * 32
@@ -366,7 +387,13 @@ def import_process_output(args):
         if not spectrum.any_active():
             continue
 
-        inv_model_result, should_be_true = get_inv_model_results_or_none(spectrum, inv_model)
+        inv_model_result, should_be_true = get_inv_model_results_or_none(
+            spectrum, inv_model,
+            inductance=args['inductance'],
+            zarc_inductance=args['zarc_inductance'],
+            num_zarcs=args['num_zarcs']
+        )
+
         assert should_be_true
 
         
@@ -481,67 +508,48 @@ def import_process_output(args):
         })
 
     #parameters
+
+    all_labels = \
+     [
+         (True, '{} R (ohm)'),
+         (args['zarc_impedance'], '{} R_zarc_impedance (ohm)'),
+         (args['num_zarcs']>=1, '{} R_zarc_1 (ohm)'),
+         (args['num_zarcs']>=2, '{} R_zarc_2 (ohm)'),
+         (args['num_zarcs']>=3, '{} R_zarc_3 (ohm)'),
+         (True, '{} Q_warburg (?)'),
+         (args['inductance'], '{} Q_inductance (?)'),
+         (args['zarc_impedance'], '{} W_c_inductance (rad/s)'),
+         (args['num_zarcs']>=1, '{} W_c_zarc_1 (rad/s)'),
+         (args['num_zarcs']>=2, '{} W_c_zarc_2 (rad/s)'),
+         (args['num_zarcs']>=3, '{} W_c_zarc_3 (rad/s)'),
+         (True, '{} Phi_warburg (unitless)'),
+         (args['num_zarcs']>=1, '{} Phi_zarc_1 (unitless)'),
+         (args['num_zarcs']>=2, '{} Phi_zarc_2 (unitless)'),
+         (args['num_zarcs']>=3, '{} Phi_zarc_3 (unitless)'),
+         (args['inductance'], '{} Phi_inductance (unitless)'),
+         (args['zarc_inductance'], '{} Phi_zarc_inductance (unitless)'),
+    ]
+
+
     with open(os.path.join(args['output_dir'], 'CircuitParameterFits.csv'), 'w', newline='') as csvfile:
         writer = csv.writer(csvfile, delimiter=',')
-        writer.writerow(['Original Filename',
-                         'Inverse Model R (ohm)',
-                         'Inverse Model R_zarc_impedance (ohm)',
-                         'Inverse Model R_zarc_1 (ohm)',
-                         'Inverse Model R_zarc_2 (ohm)',
-                         'Inverse Model R_zarc_3 (ohm)',
-                         'Inverse Model Q_warburg (?)',
-                         'Inverse Model Q_inductance (?)',
-                         'Inverse Model W_c_inductance (rad/s)',
-                         'Inverse Model W_c_zarc_1 (rad/s)',
-                         'Inverse Model W_c_zarc_2 (rad/s)',
-                         'Inverse Model W_c_zarc_3 (rad/s)',
-                         'Inverse Model Phi_warburg (unitless)',
-                         'Inverse Model Phi_zarc_1 (unitless)',
-                         'Inverse Model Phi_zarc_2 (unitless)',
-                         'Inverse Model Phi_zarc_3 (unitless)',
-                         'Inverse Model Phi_inductance (unitless)',
-                         'Inverse Model Phi_zarc_inductance (unitless)',
-                         'Finetuned R (ohm)',
-                         'Finetuned R_zarc_impedance (ohm)',
-                         'Finetuned R_zarc_1 (ohm)',
-                         'Finetuned R_zarc_2 (ohm)',
-                         'Finetuned R_zarc_3 (ohm)',
-                         'Finetuned Q_warburg (?)',
-                         'Finetuned Q_inductance (?)',
-                         'Finetuned W_c_inductance (rad/s)',
-                         'Finetuned W_c_zarc_1 (rad/s)',
-                         'Finetuned W_c_zarc_2 (rad/s)',
-                         'Finetuned W_c_zarc_3 (rad/s)',
-                         'Finetuned Phi_warburg (unitless)',
-                         'Finetuned Phi_zarc_1 (unitless)',
-                         'Finetuned Phi_zarc_2 (unitless)',
-                         'Finetuned Phi_zarc_3 (unitless)',
-                         'Finetuned Phi_inductance (unitless)',
-                         'Finetuned Phi_zarc_inductance (unitless)',
-                         'Delta R (ohm)',
-                         'Delta R_zarc_impedance (ohm)',
-                         'Delta R_zarc_1 (ohm)',
-                         'Delta R_zarc_2 (ohm)',
-                         'Delta R_zarc_3 (ohm)',
-                         'Delta Q_warburg (?)',
-                         'Delta Q_inductance (?)',
-                         'Delta W_c_inductance (rad/s)',
-                         'Delta W_c_zarc_1 (rad/s)',
-                         'Delta W_c_zarc_2 (rad/s)',
-                         'Delta W_c_zarc_3 (rad/s)',
-                         'Delta Phi_warburg (unitless)',
-                         'Delta Phi_zarc_1 (unitless)',
-                         'Delta Phi_zarc_2 (unitless)',
-                         'Delta Phi_zarc_3 (unitless)',
-                         'Delta Phi_inductance (unitless)',
-                         'Delta Phi_zarc_inductance (unitless)',
-                         ])
+        writer.writerow(
+            ['Original Filename'] +
+            sum([
+                [
+                    t[1].format(lab) for t in all_labels if t[0]
+                ] for lab in ['Inverse Model','Finetuned','Delta']
+            ]),
+        )
         for res in results:
             writer.writerow(
                 [res['filename']] +
-                ['{}'.format(x) for x in res['inverse_model_params']] +
-                ['{}'.format(x) for x in res['finetuned_params']] +
-                ['{}'.format(x) for x in res['delta_params']]
+                sum([
+                        [
+                            '{}'.format(res[k][i]) for i in range(len(all_labels)) if all_labels[i][0]
+                        ] for k in ['inverse_model_params', 'finetuned_params', 'delta_params']
+                    ]
+                )
             )
 
 
@@ -574,6 +582,16 @@ class Command(BaseCommand):
         parser.set_defaults(angular_freq=False)
 
         parser.add_argument('--chunk_num', type=int, default=256)
+
+        parser.add_argument('--inductance', dest='inductance', action='store_true')
+        parser.add_argument('--no-inductance', dest='inductance', action='store_false')
+        parser.set_defaults(inductance=False)
+
+        parser.add_argument('--zarc-inductance', dest='zarc_inductance', action='store_true')
+        parser.add_argument('--no-zarc-inductance', dest='zarc_inductance', action='store_false')
+        parser.set_defaults(zarc_inductance=False)
+
+        parser.add_argument('--num_zarcs', type=int, default=3)
 
     def handle(self, *args, **options):
         if options['mode'] == 'import_directory':

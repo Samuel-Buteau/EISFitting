@@ -191,6 +191,10 @@ class InverseModelResult(models.Model):
         on_delete=models.CASCADE
     )
 
+    inductance = models.BooleanField(default=False)
+    zarc_inductance = models.BooleanField(default=False)
+    num_zarcs = models.IntegerField(default=3)
+
     activity_setting = models.OneToOneField(
         ActivitySetting,
         on_delete=models.CASCADE
