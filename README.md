@@ -60,14 +60,14 @@ python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraini
 
 # Requirements
 see requirements.txt
-install the requirements by running on the command line "pip install <something>" with <something substituted for a requirement.
+install the requirements by running on the command line "pip install *something*" with *something* substituted for a requirement.
 
 # Investigation and New Features
 
-We have identified a problem with softmax over NINF. the solution was to use float32.max instead.
-There is still a problem with that code base. 
-Now trying without infinities.
+we saw crappy perf.
+This was due to training with 0 to 2 components.
+Now it seems that we can recover ok perf. However, we see that a bigger model does better (underfitting)
+we have that 2 layers of 16 filters < 3 layers of 24 filters < 4 layers of 32 filters.
 
-We still don't know the impact of having synthetic data. but not having it is not preventing overfitting
-
-We still don't know the impact of having regular convolutions. but having does not prevent overfit.
+We are now trying 5 layers of 40 filters.
+we are also trying to ablate (3/40, 5/20) to see if depth or width is most important.

@@ -599,7 +599,7 @@ class NonparametricOptimizer(object):
 
     """
 
-    def __init__(self, parameter_matrix, spectrum_matrix, valid_freqs_counts_matrix, model_meta_matrix):
+    def __init__(self, parameter_matrix, spectrum_matrix, valid_freqs_counts_matrix, model_meta_compressed_matrix):
 
         self.sensible_phi_coeff = tf.placeholder(dtype=tf.float32)
         self.simplicity_coeff = tf.placeholder(dtype=tf.float32)
@@ -615,10 +615,7 @@ class NonparametricOptimizer(object):
                                            name='valid_freqs_counts_matrix',
                                            shape=valid_freqs_counts_matrix.shape,
                                            )
-        self.model_meta_matrix = tf.constant(value=model_meta_matrix,
-                                           name='model_meta_matrix',
-                                           shape=model_meta_matrix.shape,
-                                           )
+        self.model_meta_compressed_matrix = model_meta_compressed_matrix
 
         self.freqs_num = spectrum_matrix.shape[1]
 
@@ -882,9 +879,9 @@ def run_optimizer_on_data(cleaned_data, args, chunk_num):
 
 
 
-    model_meta_compressed_global = tf.constant([inductance, zarc_inductance, args['num_zarcs']])
+    model_meta_compressed_global = tf.constant(numpy.array([inductance, zarc_inductance, args['num_zarcs']], dtype=numpy.int32))
     model_meta_compressed = tf.tile(tf.expand_dims(model_meta_compressed_global, axis=0), multiples=[spectrum_count, 1])
-
+    print(model_meta_compressed)
 
     indices = tf.placeholder(shape=[None], dtype=tf.int32)
 
@@ -1344,14 +1341,14 @@ def train(args):
         (
             tf.random.uniform(
                 [args.batch_size, 2],
-                minval=0,
-                maxval=2,
+                minval=args.inductances_training_lower,
+                maxval=args.inductances_training_upper+1,
                 dtype=tf.int32,
             ),
             tf.random.uniform(
                 [args.batch_size, 1],
-                minval=0,
-                maxval=3,
+                minval=args.num_zarcs_training_lower,
+                maxval=args.num_zarcs_training_upper+1,
                 dtype=tf.int32,
             ),
         ),
@@ -1996,17 +1993,15 @@ if __name__ == '__main__':
 
     parser.add_argument('--percent_training', type=int, default=1)
 
-    parser.add_argument('--total_steps', type=int, default=250000)
+    parser.add_argument('--total_steps', type=int, default=500000)
     parser.add_argument('--checkpoint_every', type=int, default=1000)
     parser.add_argument('--log_every', type=int, default=1000)
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--nll_coeff', type=float, default=.1)
     parser.add_argument('--ordering_coeff', type=float, default=.5)
-    parser.add_argument('--simplicity_coeff', type=float, default=.1)
+    parser.add_argument('--simplicity_coeff', type=float, default=.01)
     parser.add_argument('--sensible_phi_coeff', type=float, default=1.)
-    parser.add_argument('--adam_beta1', type=float, default=.9)
-    parser.add_argument('--adam_beta2', type=float, default=.999)
-    parser.add_argument('--adam_epsilon', type=float, default=1e-8)
+
 
     parser.add_argument('--global_norm_clip', type=float, default=10.)
     parser.add_argument('--seed', type=int, default=13311772)
@@ -2043,13 +2038,19 @@ if __name__ == '__main__':
 
     parser.add_argument('--inductance', dest='inductance', action='store_true')
     parser.add_argument('--no-inductance', dest='inductance', action='store_false')
-    parser.set_defaults(inductance=False)
+    parser.set_defaults(inductance=True)
 
     parser.add_argument('--zarc-inductance', dest='zarc_inductance', action='store_true')
     parser.add_argument('--no-zarc-inductance', dest='zarc_inductance', action='store_false')
-    parser.set_defaults(zarc_inductance=False)
+    parser.set_defaults(zarc_inductance=True)
 
     parser.add_argument('--num_zarcs', type=int, default=3)
+
+    parser.add_argument('--num_zarcs_training_lower', type=int, default=3)
+    parser.add_argument('--num_zarcs_training_upper', type=int, default=3)
+
+    parser.add_argument('--inductances_training_lower', type=int, default=1)
+    parser.add_argument('--inductances_training_upper', type=int, default=1)
 
     args = parser.parse_args()
     if args.mode == 'train':
