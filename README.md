@@ -1,6 +1,10 @@
 # EISFitting
 
+Recent Changes:
+Now, many equivalent circuits are implemented. 
+
 # Usage
+
 The current version of the software comes with a pretrained model, 
 and can be run on a given Folder. By running the code on a given Folder, 
 1) all the recognised files will be imported into the internal database. 
@@ -15,16 +19,24 @@ only the import function needs to be rewritten to fill the database with the rig
     2) The parameters produced by finetuning.
     3) The difference between the two. (this is a proxy for the uncertainty in those fitting parameters.)
 
-
+## Typical usage
 the command to be run, from the root of the project:
 python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=RealData\EIS --dataset=USER7 --output_dir=OutputData10
+
 this will look in the folder RealData/EIS for the spectra. 
 it will process all the data and record it under a "dataset" called USER7. 
 It will then output the results in a folder called OutputData10
+
+
+## Separating the outputs and organizing data into datasets
 If this command is run on different data with the same option for --dataset, 
 the data will be stored in the same place and outputted all at once. 
-So if you want separate outputs, use different dataset options 
+
+If you want separate outputs, use different dataset options 
 (i.e. --dataset=USER7 the first time and --dataset=USER8 the second time)
+
+
+## Specifying a different inverse model
 Furthermore, one can use different versions of the inverse_model. 
 The model itself is contained in a folder. 
 By default, a model which used only one percent of the data to 
@@ -32,6 +44,7 @@ train is provided in OnePercentTraining.
 To use a different model, replace --logdir=OnePercentTraining 
 with --logdir=TenPercentTraining for instance.
 
+## Angular frequency or plain frequency
 The output contains the original spectra, as well as the fitted versions, 
 but there is the option to represent impedance as a function of either 
 1) Frequency (Hz) or (simply add --no-angular-freq as an option)
@@ -40,6 +53,16 @@ but there is the option to represent impedance as a function of either
 for instance, to get angular frequency on the previous data:
 python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --angular-freq --output_dir=OutputData10 --input_dir=RealData\EIS --dataset=USER7
 
+
+## Specifying the equivalent circuit
+
+By default, the equivalent circuit used has 3 ZARC components, and it does not have an inductance nor does it have a zarc inductance.
+If a different number of ZARC components are desired (e.g. 2), simply add e.g. --num_zarcs=2. this would give 
+python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=RealData\EIS --dataset=USER7 --output_dir=OutputData10 --num_zarcs=2
+
+If an inductance is desired, simply pass --inductance
+If a zarc inductance is desired, simply pass --zarc-inductance.
+These can both be passed if both components are desired. 
 
 # Locations
 ## Folders
@@ -60,14 +83,20 @@ python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraini
 
 # Requirements
 see requirements.txt
-install the requirements by running on the command line "pip install <something>" with <something substituted for a requirement.
+install the requirements by running on the command line "pip install *something*" with *something* substituted for a requirement.
 
 # Investigation and New Features
 
-We have identified a problem with softmax over NINF. the solution was to use float32.max instead.
-There is still a problem with that code base. 
-Now trying without infinities.
+we saw crappy perf.
+This was due to training with 0 to 2 components.
+Now it seems that we can recover ok perf. However, we see that a bigger model does better (underfitting)
+we have that 2 layers of 16 filters < 3 layers of 24 filters < 4 layers of 32 filters.
 
-We still don't know the impact of having synthetic data. but not having it is not preventing overfitting
+We are now trying 5 layers of 40 filters.
+we are also trying to ablate (3/40, 5/20) to see if depth or width is most important.
 
-We still don't know the impact of having regular convolutions. but having does not prevent overfit.
+Generally, we have seen that the big models were good when trained only for a short time. 
+We can simply use the model as is for now. 
+
+We must make sure that the text user interface works with the upgraded model.
+Then we must make a basic graphical user interface for plain data to allow visualization and correction of bad data.

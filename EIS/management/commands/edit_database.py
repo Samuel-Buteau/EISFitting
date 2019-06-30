@@ -66,12 +66,14 @@ class Command(BaseCommand):
         if options['mode'] == 'add_default_inverse_models':
 
             dummies = [
+
                 {
-                    'logdir': 'OnePercentTraining',
-                    'kernel_size':7,
-                    'conv_filters':16,
-                    'num_conv':2,
+                    'logdir': 'OnePercentTraining_big3_new',
+                    'kernel_size': 7,
+                    'conv_filters': 40,
+                    'num_conv': 5,
                 },
+
             ]
             for dummy in dummies:
                 if not InverseModel.objects.filter(logdir=dummy['logdir']):
