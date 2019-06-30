@@ -149,7 +149,11 @@ def import_process_output(args):
 
     ImpedanceSample.objects.bulk_create(all_samples)
 
-    #process 1
+    '''
+    ======================================================================================
+    Use the neural network
+    ======================================================================================
+    '''
     print('running neural net')
 
     if not InverseModel.objects.filter(logdir=args['logdir']).exists():
@@ -275,7 +279,12 @@ def import_process_output(args):
         CircuitParameter.objects.bulk_create(circuit_parameters_list)
         FitSample.objects.bulk_create(fit_samples_list)
 
-   # process 2
+
+    '''
+    ======================================================================================
+    Apply finetuning
+    ======================================================================================
+    '''
     print('running finetuning')
 
 
@@ -330,7 +339,7 @@ def import_process_output(args):
                 )
             )
 
-
+    print(cleaned_data)
     results = run_optimizer_on_data(
         cleaned_data=cleaned_data,
         args={
@@ -512,13 +521,13 @@ def import_process_output(args):
     all_labels = \
      [
          (True, '{} R (ohm)'),
-         (args['zarc_impedance'], '{} R_zarc_impedance (ohm)'),
+         (args['zarc_inductance'], '{} R_zarc_impedance (ohm)'),
          (args['num_zarcs']>=1, '{} R_zarc_1 (ohm)'),
          (args['num_zarcs']>=2, '{} R_zarc_2 (ohm)'),
          (args['num_zarcs']>=3, '{} R_zarc_3 (ohm)'),
          (True, '{} Q_warburg (?)'),
          (args['inductance'], '{} Q_inductance (?)'),
-         (args['zarc_impedance'], '{} W_c_inductance (rad/s)'),
+         (args['zarc_inductance'], '{} W_c_inductance (rad/s)'),
          (args['num_zarcs']>=1, '{} W_c_zarc_1 (rad/s)'),
          (args['num_zarcs']>=2, '{} W_c_zarc_2 (rad/s)'),
          (args['num_zarcs']>=3, '{} W_c_zarc_3 (rad/s)'),
@@ -533,13 +542,15 @@ def import_process_output(args):
 
     with open(os.path.join(args['output_dir'], 'CircuitParameterFits.csv'), 'w', newline='') as csvfile:
         writer = csv.writer(csvfile, delimiter=',')
+
         writer.writerow(
             ['Original Filename'] +
             sum([
                 [
                     t[1].format(lab) for t in all_labels if t[0]
                 ] for lab in ['Inverse Model','Finetuned','Delta']
-            ]),
+            ],
+            []),
         )
         for res in results:
             writer.writerow(
@@ -548,7 +559,8 @@ def import_process_output(args):
                         [
                             '{}'.format(res[k][i]) for i in range(len(all_labels)) if all_labels[i][0]
                         ] for k in ['inverse_model_params', 'finetuned_params', 'delta_params']
-                    ]
+                    ],
+                    []
                 )
             )
 

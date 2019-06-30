@@ -128,195 +128,317 @@ def Prior():
 
 
 #TODO: make some components maskable
-def ImpedanceModel(params_, frequencies_, batch_size):
+def ImpedanceModel(params_, frequencies_, batch_size, model_meta=None):
     '''
+
+    right now, model_meta
+    is going to be 2 + number_of_zarcs boolean flags.
 
     :param params:
     :param frequencies:
     :return:
     '''
 
-    params = tf.to_double(params_)
-    frequencies = tf.to_double(frequencies_)
-    # params: {r, r_zarc_inductance, r_zarc_i...
-    # ... q_warburg, q_inductance
-    # ... w_c_inductance, w_c_zarc_i...
-    # ... phi_warburg, phi_zarc_i...
-    # ... phi_inductance, phi_zarc_inductance
-    number_of_zarc =3
+    if model_meta is None:
+        params = tf.to_double(params_)
+        frequencies = tf.to_double(frequencies_)
+        # params: {r, r_zarc_inductance, r_zarc_i...
+        # ... q_warburg, q_inductance
+        # ... w_c_inductance, w_c_zarc_i...
+        # ... phi_warburg, phi_zarc_i...
+        # ... phi_inductance, phi_zarc_inductance
+        number_of_zarc =3
 
-    params_reshaped = tf.expand_dims(params, axis=2)
+        params_reshaped = tf.expand_dims(params, axis=2)
 
-    batch_zeros = tf.zeros([batch_size, 1], dtype = tf.float64)
-    full_zeros = tf.zeros_like(frequencies, dtype = tf.float64)
-
-
-    first_mark =1+1+number_of_zarc+2+1+number_of_zarc
-    second_mark = first_mark + 1 + number_of_zarc
+        batch_zeros = tf.zeros([batch_size, 1], dtype = tf.float64)
+        full_zeros = tf.zeros_like(frequencies, dtype = tf.float64)
 
 
-    params_to_exp = tf.exp(params_reshaped[:, :first_mark])
-    params_to_sigm = tf.sigmoid(params_reshaped[:, first_mark:second_mark])
-    params_to_neg_sigm = -1./(1. + tf.square(params_reshaped[:, second_mark:]))
-
-    '''
-       - Resistor, parameters {R}: Z(W) = R + i * 0
-       - Constant Phase Element, parameters {q, phi}: Z(W) = exp(q) * W^-Phi * (i)^-Phi 
-       - Zarc, parameters {R, W_c, Phi}: Z(W) = R/(1 + (i W/W_c)^(Phi))
+        first_mark =1+1+number_of_zarc+2+1+number_of_zarc
+        second_mark = first_mark + 1 + number_of_zarc
 
 
-    '''
-    exp_frequencies = tf.exp(frequencies)
+        params_to_exp = tf.exp(params_reshaped[:, :first_mark])
+        params_to_sigm = tf.sigmoid(params_reshaped[:, first_mark:second_mark])
+        params_to_neg_sigm = -1./(1. + tf.square(params_reshaped[:, second_mark:]))
 
-    R = params_to_exp[:,0]
+        '''
+           - Resistor, parameters {R}: Z(W) = R + i * 0
+           - Constant Phase Element, parameters {q, phi}: Z(W) = exp(q) * W^-Phi * (i)^-Phi 
+           - Zarc, parameters {R, W_c, Phi}: Z(W) = R/(1 + (i W/W_c)^(Phi))
+    
+    
+        '''
+        exp_frequencies = tf.exp(frequencies)
 
-
-    impedance = tf.complex(full_zeros + R,full_zeros)
-
-    imaginary_unit = tf.to_complex128(tf.complex(0.,1.))
-
-    # warburg
-    phi = params_to_sigm[:,0]
-    exp_q = params_to_exp[:,5]
-
-    bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
-    real_bad_piece = tf.real(bad_piece)
-    imag_bad_piece = tf.imag(bad_piece)
-    bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
-
-    impedance += tf.complex(
-        real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
-               )
-
-    # inductance
-    phi = params_to_neg_sigm[:,0]
-    exp_q = params_to_exp[:, 6]
-
-    bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
-    real_bad_piece = tf.real(bad_piece)
-    imag_bad_piece = tf.imag(bad_piece)
-    bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
-
-    impedance += tf.complex(
-        real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
-               )
-
-    #inductance zarc
-    phi = tf.complex(params_to_neg_sigm[:,1], batch_zeros)
-    w_c = tf.complex(params_to_exp[:,7], batch_zeros)
-    r = tf.complex(params_to_exp[:,1], batch_zeros)
-    imag_freq = tf.complex(full_zeros, exp_frequencies)
-
-    impedance += r/(1. + tf.pow((imag_freq/w_c), phi))
+        R = params_to_exp[:,0]
 
 
-    for index in range(3):
-        # zarc
-        phi = tf.complex(params_to_sigm[:, 1+index], batch_zeros)
-        w_c = tf.complex(params_to_exp[:, 8+index], batch_zeros)
-        r = tf.complex(params_to_exp[:, 2+index], batch_zeros)
+        impedance = tf.complex(full_zeros + R,full_zeros)
+
+        imaginary_unit = tf.to_complex128(tf.complex(0.,1.))
+
+        # warburg
+        phi = params_to_sigm[:,0]
+        exp_q = params_to_exp[:,5]
+
+        bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
+        real_bad_piece = tf.real(bad_piece)
+        imag_bad_piece = tf.imag(bad_piece)
+        bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
+
+        impedance += tf.complex(
+            real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
+                   )
+
+        # inductance
+        phi = params_to_neg_sigm[:,0]
+        exp_q = params_to_exp[:, 6]
+
+        bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
+        real_bad_piece = tf.real(bad_piece)
+        imag_bad_piece = tf.imag(bad_piece)
+        bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
+
+        impedance += tf.complex(
+            real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
+                   )
+
+        #inductance zarc
+        phi = tf.complex(params_to_neg_sigm[:,1], batch_zeros)
+        w_c = tf.complex(params_to_exp[:,7], batch_zeros)
+        r = tf.complex(params_to_exp[:,1], batch_zeros)
+        imag_freq = tf.complex(full_zeros, exp_frequencies)
+
+        impedance += r/(1. + tf.pow((imag_freq/w_c), phi))
+
+
+        for index in range(3):
+            # zarc
+            phi = tf.complex(params_to_sigm[:, 1+index], batch_zeros)
+            w_c = tf.complex(params_to_exp[:, 8+index], batch_zeros)
+            r = tf.complex(params_to_exp[:, 2+index], batch_zeros)
+
+            impedance += r / (1. + tf.pow((imag_freq / w_c), phi))
+
+
+
+        impedance_real = tf.real(impedance)
+        impedance_imag = tf.imag(impedance)
+
+        impedance_stacked = tf.to_float(tf.stack([impedance_real,impedance_imag], axis=2))
+
+        return impedance_stacked
+
+    else:
+        model_meta = tf.to_double(model_meta)
+        model_meta_inductance = 0
+        model_meta_zarc_inductance = 1
+        model_meta_zarc = 2
+
+        params = tf.to_double(params_)
+        frequencies = tf.to_double(frequencies_)
+        # params: {r, r_zarc_inductance, r_zarc_i...
+        # ... q_warburg, q_inductance
+        # ... w_c_inductance, w_c_zarc_i...
+        # ... phi_warburg, phi_zarc_i...
+        # ... phi_inductance, phi_zarc_inductance
+        number_of_zarc = 3
+
+        params_reshaped = tf.expand_dims(params, axis=2)
+
+        batch_zeros = tf.zeros([batch_size, 1], dtype=tf.float64)
+        full_zeros = tf.zeros_like(frequencies, dtype=tf.float64)
+
+        first_mark = 1 + 1 + number_of_zarc + 2 + 1 + number_of_zarc
+        second_mark = first_mark + 1 + number_of_zarc
+
+        params_to_exp = tf.exp(params_reshaped[:, :first_mark])
+        params_to_sigm = tf.sigmoid(params_reshaped[:, first_mark:second_mark])
+        params_to_neg_sigm = -1. / (1. + tf.square(params_reshaped[:, second_mark:]))
+
+        '''
+           - Resistor, parameters {R}: Z(W) = R + i * 0
+           - Constant Phase Element, parameters {q, phi}: Z(W) = exp(q) * W^-Phi * (i)^-Phi 
+           - Zarc, parameters {R, W_c, Phi}: Z(W) = R/(1 + (i W/W_c)^(Phi))
+
+
+        '''
+        exp_frequencies = tf.exp(frequencies)
+
+        R = params_to_exp[:, 0]
+
+        impedance = tf.complex(full_zeros + R, full_zeros)
+
+        imaginary_unit = tf.to_complex128(tf.complex(0., 1.))
+
+        # warburg
+        phi = params_to_sigm[:, 0]
+        exp_q = params_to_exp[:, 5]
+
+        bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
+        real_bad_piece = tf.real(bad_piece)
+        imag_bad_piece = tf.imag(bad_piece)
+        bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
+
+        impedance += tf.complex(
+            real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
+        )
+
+        # inductance
+        phi = params_to_neg_sigm[:, 0]
+        exp_q = params_to_exp[:, 6] * tf.expand_dims(model_meta[:, model_meta_inductance],axis=1)
+
+        bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
+        real_bad_piece = tf.real(bad_piece)
+        imag_bad_piece = tf.imag(bad_piece)
+        bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
+
+        impedance +=  tf.complex(
+            real_bad_piece * bad_piece2,
+            imag_bad_piece * bad_piece2
+        )
+
+        # inductance zarc
+        phi = tf.complex(params_to_neg_sigm[:, 1], batch_zeros)
+        w_c = tf.complex(params_to_exp[:, 7], batch_zeros)
+        r = tf.complex(params_to_exp[:, 1] * tf.expand_dims(model_meta[:, model_meta_zarc_inductance],axis=1), batch_zeros)
+        imag_freq = tf.complex(full_zeros, exp_frequencies)
 
         impedance += r / (1. + tf.pow((imag_freq / w_c), phi))
 
+        for index in range(3):
+            # zarc
+            phi = tf.complex(params_to_sigm[:, 1 + index], batch_zeros)
+            w_c = tf.complex(params_to_exp[:, 8 + index], batch_zeros)
+            r = tf.complex(params_to_exp[:, 2 + index] * tf.expand_dims(model_meta[:, model_meta_zarc + index],axis=1), batch_zeros)
+
+            impedance += r / (1. + tf.pow((imag_freq / w_c), phi))
+
+        impedance_real = tf.real(impedance)
+        impedance_imag = tf.imag(impedance)
+
+        impedance_stacked = tf.to_float(tf.stack([impedance_real, impedance_imag], axis=2))
+
+        return impedance_stacked
 
 
-    impedance_real = tf.real(impedance)
-    impedance_imag = tf.imag(impedance)
 
-    impedance_stacked = tf.to_float(tf.stack([impedance_real,impedance_imag], axis=2))
+def get_losses(representation_mu, inputs, masks_float, impedances, zarc_meta,batch_size,valid_freqs_counts,prior_mu,prior_log_sigma_sq, model_meta):
+    _, variances = tf.nn.weighted_moments(inputs[:, :, 1:], axes=[1],
+                                          frequency_weights=tf.expand_dims(masks_float, axis=2), keep_dims=False)
+    std_devs = 1.0 / (0.02 + tf.sqrt(variances))
 
-    return impedance_stacked
-
-'''
-
-def HardImpedanceModel(params_, masks, frequencies_, batch_size, number_of_zarcs=7):
-    
-
-    params = tf.to_double(params_)
-    frequencies = tf.to_double(frequencies_)
-    # params: {r, r_zarc_inductance, r_zarc_i...
-    # ... q_warburg, q_inductance
-    # ... w_c_inductance, w_c_zarc_i...
-    # ... phi_warburg, phi_zarc_i...
-    # ... phi_inductance, phi_zarc_inductance
-
-    params_reshaped = tf.expand_dims(params, axis=2)
-
-    batch_zeros = tf.zeros([batch_size, 1], dtype=tf.float64)
-    full_zeros = tf.zeros_like(frequencies, dtype=tf.float64)
-
-    first_mark = 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs
-    second_mark = first_mark + 1 + number_of_zarcs
-
-    params_to_exp = tf.exp(params_reshaped[:, :first_mark])
-    params_to_sigm = tf.sigmoid(params_reshaped[:, first_mark:second_mark])
-    params_to_neg_sigm = -1. / (1. + tf.square(params_reshaped[:, second_mark:]))
-
-    
-
-    last_frequencies = 1.0 + frequencies[:,-1]
-
-    first_frequencies = -1.0 + frequencies[:,0]
-
-    exp_frequencies = tf.exp(frequencies)
-
-    R = params_to_exp[:, 0]
-
-    impedance = tf.complex(full_zeros + R, full_zeros)
-
-    imaginary_unit = tf.to_complex128(tf.complex(0., 1.))
-
-    # warburg
-    phi = params_to_sigm[:, 0]
-    exp_q = params_to_exp[:, 2 + number_of_zarcs]
-
-    bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
-    real_bad_piece = tf.real(bad_piece)
-    imag_bad_piece = tf.imag(bad_piece)
-    bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
-
-    impedance += tf.complex(
-        real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
+    reconstruction_loss = (
+            tf.reduce_sum(
+                masks_float *
+                tf.reduce_mean(
+                    tf.square(
+                        tf.expand_dims(std_devs, axis=1) *
+                        (impedances - inputs[:, :, 1:])
+                    ),
+                    axis=[2]
+                ),
+                axis=[1]
+            ) /
+            tf.reduce_sum(masks_float, axis=[1])
     )
 
-    # inductance
-    phi = params_to_neg_sigm[:, 0]
-    exp_q = params_to_exp[:, 2 + number_of_zarcs + 1]
+    # simplicity loss
+    rs = representation_mu[:, 2:2 + 3]
+    # set resistances to 0
+    l_half = tf.square(tf.reduce_sum(tf.exp(.5 * rs) * zarc_meta, axis=1))
+    l_1 = tf.reduce_sum(tf.exp(rs) * zarc_meta, axis=1)
+    simplicity_loss = (l_half + l_1)
+    complexity_metric = tf.reduce_mean(l_half / (1e-10 + l_1))
 
-    bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
-    real_bad_piece = tf.real(bad_piece)
-    imag_bad_piece = tf.imag(bad_piece)
-    bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
+    # sensible_phi loss
 
-    impedance += tf.complex(
-        real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
+    number_of_zarcs = 3
+
+    phi_zarcs_mark = 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs + 1
+    phi_warburg_mark = 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs
+
+    phi_warburg = tf.sigmoid(representation_mu[:, phi_warburg_mark])
+    phi_zarcs = tf.sigmoid(representation_mu[:, phi_zarcs_mark:phi_zarcs_mark + 3])
+
+    sensible_phi_loss = (
+            tf.square(tf.nn.relu(0.4 - phi_warburg)) +
+            tf.square(tf.nn.relu(phi_warburg - 0.6)) +
+            tf.reduce_sum(
+                tf.nn.relu(0.5 - phi_zarcs) * zarc_meta,
+                axis=1
+            )
+
     )
 
-    # inductance zarc
-    phi = tf.complex(params_to_neg_sigm[:, 1], batch_zeros)
-    w_c = tf.complex(params_to_exp[:, 2 + number_of_zarcs + 2 ], batch_zeros)
-    r = tf.complex(params_to_exp[:, 1], batch_zeros)
-    imag_freq = tf.complex(full_zeros, exp_frequencies)
+    number_of_zarcs = 3
+    first_wc_index = 2 + number_of_zarcs + 3
+    wcs = representation_mu[:,
+          first_wc_index:first_wc_index + number_of_zarcs]
 
-    impedance += r / (1. + tf.pow((imag_freq / w_c), phi))
+    frequencies = inputs[:, :, 0]
+    max_frequencies = tf.gather_nd(
+        params=frequencies,
+        indices=tf.stack((tf.range(batch_size), valid_freqs_counts - 1), axis=1)
+    )
 
-    for index in range(number_of_zarcs):
-        # zarc
-        phi = tf.complex(params_to_sigm[:, 1 + index], batch_zeros)
-        w_c = tf.complex(params_to_exp[:, number_of_zarcs + 5 + index], batch_zeros)
-        w_c_log = params[:, number_of_zarcs + 5 + index]
-        freq_mask = tf.sigmoid(10.*(-w_c_log + last_frequencies)) * tf.sigmoid(10.*(w_c_log - first_frequencies))
-        r = tf.complex( tf.expand_dims(freq_mask, axis=1) * masks[:,index:index+1]*params_to_exp[:, 2 + index], batch_zeros)
+    ordering_loss = (
+            tf.nn.relu(wcs[:, 0] - wcs[:, 1]) +
+            tf.nn.relu(wcs[:, 1] - wcs[:, 2]) +
+            tf.nn.relu(wcs[:, 2] - max_frequencies[:]) +
+            tf.nn.relu(frequencies[:, 0] - wcs[:, 0])
+    )
 
-        impedance += r / (1. + tf.pow((imag_freq / w_c), phi))
+    prior_mu_ = tf.expand_dims(prior_mu, axis=0)
+    prior_log_sigma_sq_ = tf.expand_dims(prior_log_sigma_sq, axis=0)
 
-    impedance_real = tf.real(impedance)
-    impedance_imag = tf.imag(impedance)
 
-    impedance_stacked = tf.to_float(tf.stack([impedance_real, impedance_imag], axis=2))
+    '''
+    
+    - (index 0) r, the ohmic resistor. Reparameterized such that the actual resistance is exp(r)
+    - (index 1) r_zarc_inductance, the resistance of the inductance zarc. Reparameterized such that actual resistance is exp(r_zarc_inductance)
+    - (index 2:2+num_zarcs) [r_zarc_1, r_zarc_2, r_zarc_3], the 3 resistances of the electrochemical zarcs. Reparameterized.
+    - (index 2+numzarcs) q_warburg
+    - (index 2 + num_zarcs + 1) q_inductance
+    - (index 2 + num_zarcs + 2) w_c_inductance
+    - (index 2 + num_zarcs + 3: 2 + num_zarcs + 3 + num_zarcs) [w_c_zarc_1, w_c_zarc_2, w_c_zarc_3]
+    - (index 2 + num_zarcs + 3 + num_zarcs) phi_warburg
+    - (index 2 + num_zarcs + 3 + num_zarcs + 1: 2 + num_zarcs + 3 + num_zarcs + 1 + num_zarcs)[phi_zarc_1, phi_zarc_2, phi_zarc_3]
+    - (index 2 + num_zarcs + 3 + num_zarcs + 1 + num_zarcs) phi_inductance
+    - (index 2 + num_zarcs + 3 + num_zarcs + 1 + num_zarcs + 1) phi_zarc_inductance
+    
+    
+    '''
 
-    return tf.stop_gradient(impedance_stacked)
-'''
+    full_mask = tf.concat([
+        tf.ones(shape=[batch_size, 1], dtype=tf.float32),
+        model_meta[:,1:1+1],
+        zarc_meta,
+        tf.ones(shape=[batch_size, 1], dtype=tf.float32),
+        model_meta[:, 0:0 + 1],
+        model_meta[:, 1:1 + 1],
+        zarc_meta,
+        tf.ones(shape=[batch_size, 1], dtype=tf.float32),
+        zarc_meta,
+        model_meta[:, 0:1 + 1],
+    ], axis=1)
+
+    nll_loss = \
+        0.5 * tf.reduce_mean(
+            full_mask * tf.exp(- prior_log_sigma_sq_) * tf.square(representation_mu - prior_mu_),
+            axis=1
+        )
+
+    return {
+        'reconstruction_loss':reconstruction_loss,
+        'nll_loss':nll_loss,
+        'ordering_loss':ordering_loss,
+        'sensible_phi_loss':sensible_phi_loss,
+        'simplicity_loss':simplicity_loss,
+        'complexity_metric':complexity_metric
+    }
 
 class ParameterVAE(object):
 
@@ -366,9 +488,16 @@ class ParameterVAE(object):
                                                        gamma_initializer=tf.zeros_initializer(),
                                                               name="output_norm")
 
-    def build_forward(self, inputs, masks, batch_size, priors):
+    def build_forward(self,
+                      inputs, masks,
+                      model_meta,
+                      batch_size, priors,
+                      freq_counts):
+
+
         inputs_ = tf.concat(
             (
+                tf.tile(tf.expand_dims(model_meta, axis=1), multiples=[1,freq_counts, 1]),
                 tf.expand_dims(tf.cast(masks,dtype=tf.float32), axis=2),
                 inputs
             ),
@@ -401,7 +530,7 @@ class ParameterVAE(object):
 
 
         frequencies = inputs[:,:,0]
-        impedances = ImpedanceModel(z, frequencies, batch_size=batch_size)
+        impedances = ImpedanceModel(z, frequencies, batch_size=batch_size, model_meta=model_meta)
 
 
         return impedances, representation_mu
@@ -411,7 +540,7 @@ class ParameterVAE(object):
 
     def optimize_direct(self, inputs,
                         valid_freqs_counts,
-                        freqs_num,
+                        model_meta_compressed,
                         prior_mu, prior_log_sigma_sq,
                         batch_size,
                         learning_rate=None,
@@ -431,105 +560,63 @@ class ParameterVAE(object):
 
         masks_float = tf.cast(masks_logical,dtype=tf.float32)
 
-        impedances, representation_mu = self.build_forward(inputs, masks_logical, batch_size=batch_size, priors=prior_mu)
+        zarc_meta = tf.cast(
+                tf.sequence_mask(
+                lengths=model_meta_compressed[:,2],
+                maxlen=3,
+            ),
+            dtype=tf.float32
+        )
+
+
+        model_meta = tf.concat(
+            (
+                tf.cast(model_meta_compressed[:,:2], dtype=tf.float32),
+                zarc_meta
+            ),
+            axis=1
+        )
+
+        impedances, representation_mu = self.build_forward(inputs, masks_logical, model_meta=model_meta,
+                                                           batch_size=batch_size, priors=prior_mu,
+                                                           freq_counts=true_freqs_num)
 
 
         if not create_loss:
             return impedances, representation_mu
         else:
-            _, variances = tf.nn.weighted_moments(inputs[:, :, 1:], axes=[1],
-                                                  frequency_weights=tf.expand_dims(masks_float, axis=2), keep_dims=False)
-            std_devs = 1.0/(0.02 + tf.sqrt(variances))
 
-            reconstruction_loss = (
-                tf.reduce_sum(
-                    masks_float *
-                        tf.reduce_mean(
-                            tf.square(
-                                tf.expand_dims(std_devs, axis=1) *
-                                (impedances - inputs[:, :, 1:])
-                            ),
-                            axis=[2]
-                        ),
-                    axis=[1]
-                ) /
-                tf.reduce_sum(masks_float, axis=[1])
-            )
+            results = get_losses(representation_mu,
+                       inputs,
+                       masks_float,
+                       impedances,
+                       zarc_meta,
+                       batch_size,
+                       valid_freqs_counts,
+                       prior_mu,
+                       prior_log_sigma_sq,
+                       model_meta)
 
-
-            # simplicity loss
-            rs = representation_mu[:, 2:2 + 3]
-            l_half = tf.square(tf.reduce_sum(tf.exp(.5 * rs), axis=1))
-            l_1 = tf.reduce_sum(tf.exp(rs), axis=1)
-            simplicity_loss = (l_half + l_1)
-            complexity_metric = tf.reduce_mean(l_half / (1e-10 + l_1))
-
-            # sensible_phi loss
-
-            number_of_zarcs = 3
-
-            first_mark = 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs + 1
-            second_mark = first_mark + 1 + number_of_zarcs
-
-            phi_warburg = tf.sigmoid(representation_mu[:, 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs])
-            phi_zarcs = tf.sigmoid(representation_mu[:, first_mark:second_mark])
-
-            sensible_phi_loss = (
-                tf.square(tf.nn.relu(0.4 - phi_warburg)) +
-                tf.square(tf.nn.relu(phi_warburg - 0.6)) +
-                tf.nn.relu(0.5 - phi_zarcs[:, 1]) +
-                tf.nn.relu(0.5 - phi_zarcs[:, 2]) +
-                tf.nn.relu(0.5 - phi_zarcs[:, 3])
-            )
-
-
-            number_of_zarcs = 3
-            first_wc_index = 2 + number_of_zarcs + 3
-            wcs = representation_mu[:,
-                  first_wc_index:first_wc_index + number_of_zarcs]
-
-
-            frequencies = inputs[:,:,0]
-            max_frequencies =tf.gather_nd(
-                params=frequencies,
-                indices=tf.stack((tf.range(batch_size), valid_freqs_counts-1), axis=1)
-            )
-
-            ordering_loss = (
-                tf.nn.relu(wcs[:, 0] - wcs[:, 1]) +
-                tf.nn.relu(wcs[:, 1] - wcs[:, 2]) +
-                tf.nn.relu(wcs[:, 2] - max_frequencies[:]) +
-                tf.nn.relu(frequencies[:, 0] - wcs[:, 0])
-            )
-
-            prior_mu_ = tf.expand_dims(prior_mu, axis=0)
-            prior_log_sigma_sq_ = tf.expand_dims(prior_log_sigma_sq, axis=0)
-
-            nll_loss = \
-             0.5 * tf.reduce_mean(
-                    tf.exp(- prior_log_sigma_sq_) * tf.square(representation_mu-prior_mu_),
-                 axis = 1
-             )
 
             loss = tf.reduce_mean(
-                tf.stop_gradient(reconstruction_loss)) * (
-                        tf.reduce_mean(sensible_phi_loss) * self.sensible_phi_coeff +
-                        tf.reduce_mean(nll_loss) * self.nll_coeff +
-                        tf.reduce_mean(simplicity_loss) * self.simplicity_coeff +
-                        tf.reduce_mean(ordering_loss) * self.ordering_coeff
-                ) + tf.reduce_mean(reconstruction_loss)
-            reconstruction_loss = tf.reduce_mean(reconstruction_loss)
+                tf.stop_gradient(results['reconstruction_loss'])) * (
+                        tf.reduce_mean(results['sensible_phi_loss']) * self.sensible_phi_coeff +
+                        tf.reduce_mean(results['nll_loss']) * self.nll_coeff +
+                        tf.reduce_mean(results['simplicity_loss']) * self.simplicity_coeff +
+                        tf.reduce_mean(results['ordering_loss']) * self.ordering_coeff
+                ) + tf.reduce_mean(results['reconstruction_loss'])
+
+            results['reconstruction_loss'] = tf.reduce_mean(results['reconstruction_loss'])
             if trainable:
                 with tf.name_scope('summaries'):
                     tf.summary.scalar('loss', loss)
-                    tf.summary.scalar('nll_loss', tf.reduce_mean(nll_loss))
-                    tf.summary.scalar('simplicity loss', complexity_metric)
-                    tf.summary.scalar('ordering loss', tf.reduce_mean(ordering_loss))
-                    tf.summary.scalar('sensible phi loss', tf.reduce_mean(sensible_phi_loss))
-                    tf.summary.scalar('l1 loss', tf.reduce_mean(l_1))
-                    tf.summary.scalar('l1/2 loss', tf.reduce_mean(l_half))
-                    tf.summary.scalar('sqrt reconstruction_loss', tf.sqrt(reconstruction_loss))
-                    tf.summary.scalar('average mu', tf.reduce_mean(representation_mu))
+                    tf.summary.scalar('nll_loss', tf.reduce_mean(results['nll_loss']))
+                    tf.summary.scalar('simplicity loss', results['complexity_metric'])
+                    tf.summary.scalar('ordering loss', tf.reduce_mean(results['ordering_loss']))
+                    tf.summary.scalar('sensible phi loss', tf.reduce_mean(results['sensible_phi_loss']))
+
+                    tf.summary.scalar('sqrt reconstruction_loss', tf.sqrt(results['reconstruction_loss']))
+
 
                 self.merger = tf.summary.merge_all()
                 self.train_writer = tf.summary.FileWriter(os.path.join(logdir, 'train'))
@@ -554,11 +641,11 @@ class ParameterVAE(object):
                     gradients, _ = tf.clip_by_global_norm(accum_vars, global_norm_clip)
                 train_step = optimizer.apply_gradients([(gradients[i], gv[1]) for i, gv in enumerate(gvs)])
 
-                return loss, zero_ops, accum_ops, train_step, test_ops, impedances,  representation_mu, reconstruction_loss
+                return loss, zero_ops, accum_ops, train_step, test_ops, impedances,  representation_mu, results['reconstruction_loss']
 
             else:
 
-                return loss, impedances, representation_mu, reconstruction_loss
+                return loss, impedances, representation_mu, results['reconstruction_loss']
 
 
 class NonparametricOptimizer(object):
@@ -567,7 +654,7 @@ class NonparametricOptimizer(object):
 
     """
 
-    def __init__(self, parameter_matrix, spectrum_matrix, valid_freqs_counts_matrix):
+    def __init__(self, parameter_matrix, spectrum_matrix, valid_freqs_counts_matrix, model_meta_compressed_matrix):
 
         self.sensible_phi_coeff = tf.placeholder(dtype=tf.float32)
         self.simplicity_coeff = tf.placeholder(dtype=tf.float32)
@@ -583,11 +670,12 @@ class NonparametricOptimizer(object):
                                            name='valid_freqs_counts_matrix',
                                            shape=valid_freqs_counts_matrix.shape,
                                            )
+        self.model_meta_compressed_matrix = model_meta_compressed_matrix
 
         self.freqs_num = spectrum_matrix.shape[1]
 
 
-    def build_forward(self, frequencies, batch_size, indices):
+    def build_forward(self, frequencies, batch_size, indices,model_meta):
 
 
 
@@ -596,7 +684,7 @@ class NonparametricOptimizer(object):
             indices=tf.expand_dims(indices, axis=1)
         )
 
-        impedances = ImpedanceModel(z, frequencies, batch_size=batch_size)
+        impedances = ImpedanceModel(z, frequencies, batch_size=batch_size, model_meta=model_meta)
 
         return impedances, z
 
@@ -616,14 +704,37 @@ class NonparametricOptimizer(object):
             params=self.valid_freqs_counts_matrix,
             indices=tf.expand_dims(indices, axis=1)
         )
+        model_meta_compressed = tf.gather_nd(
+            params=self.model_meta_compressed_matrix,
+            indices=tf.expand_dims(indices, axis=1)
+        )
 
         true_freqs_num = tf.reduce_max(valid_freqs_counts)
         inputs = inputs[:, :true_freqs_num, :]
 
+        zarc_meta = tf.cast(
+            tf.sequence_mask(
+                lengths=model_meta_compressed[:, 2],
+                maxlen=3,
+            ),
+            dtype=tf.float32
+        )
+
+        model_meta = tf.concat(
+            (
+                tf.cast(model_meta_compressed[:, :2], dtype=tf.float32),
+                zarc_meta
+            ),
+            axis=1
+        )
+
+
         impedances, representation_mu = self.build_forward(
             frequencies=inputs[:,:,0],
             batch_size=batch_size,
-            indices=indices
+            indices=indices,
+            model_meta=model_meta
+
         )
 
         masks_logical = tf.sequence_mask(
@@ -633,65 +744,21 @@ class NonparametricOptimizer(object):
 
         masks_float = tf.cast(masks_logical, dtype=tf.float32)
 
-        _, variances = tf.nn.weighted_moments(inputs[:,:,1:],axes=[1],frequency_weights=tf.expand_dims(masks_float, axis=2), keep_dims=False)
-        std_devs = 1.0/(0.02 + tf.sqrt(variances))
-
-        reconstruction_loss = tf.reduce_sum(masks_float * tf.reduce_mean(tf.square(
-            tf.expand_dims(std_devs, axis=1) * (impedances - inputs[:,:,1:]))
-            , axis=[2]), axis=[1]) / tf.reduce_sum(masks_float, axis=[1])
-
-        # simplicity loss
-        rs = representation_mu[:, 2:2 + 3]
-        l_half = tf.square(tf.reduce_sum(tf.exp(.5 * rs), axis=1))
-        l_1 = tf.reduce_sum(tf.exp(rs), axis=1)
-        simplicity_loss = (l_half + l_1)
-        complexity_metric = tf.reduce_mean(l_half / (1e-10 + l_1))
-
-        # sensible_phi loss
-
-        number_of_zarcs = 3
-
-        first_mark = 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs + 1
-        second_mark = first_mark + 1 + number_of_zarcs
-
-        phi_warburg = tf.sigmoid(representation_mu[:, 1 + 1 + number_of_zarcs + 2 + 1 + number_of_zarcs])
-        phi_zarcs = tf.sigmoid(representation_mu[:, first_mark:second_mark])
-
-        sensible_phi_loss = (
-            tf.square(tf.nn.relu(0.4 - phi_warburg)) +
-            tf.square(tf.nn.relu(phi_warburg - 0.6)) +
-            tf.nn.relu(0.5 - phi_zarcs[:, 1]) +
-            tf.nn.relu(0.5 - phi_zarcs[:, 2]) +
-            tf.nn.relu(0.5 - phi_zarcs[:, 3])
+        results = get_losses(representation_mu,
+                             inputs,
+                             masks_float,
+                             impedances,
+                             zarc_meta,
+                             batch_size,
+                             valid_freqs_counts,
+                             prior_mu,
+                             prior_log_sigma_sq,
+                             model_meta
         )
 
 
-        number_of_zarcs = 3
-        first_wc_index = 2 + number_of_zarcs + 3
-        wcs = representation_mu[:, first_wc_index:first_wc_index + number_of_zarcs]
 
-        frequencies = inputs[:, :, 0]
-        max_frequencies = tf.gather_nd(
-            params=frequencies,
-            indices=tf.stack((tf.range(batch_size), valid_freqs_counts - 1), axis=1)
-        )
-
-        ordering_loss = (
-            tf.nn.relu(wcs[:, 0] - wcs[:, 1]) +
-            tf.nn.relu(wcs[:, 1] - wcs[:, 2]) +
-            tf.nn.relu(wcs[:, 2] - max_frequencies) +
-            tf.nn.relu(frequencies[:, 0] - wcs[:, 0])
-        )
-        prior_mu_ = tf.expand_dims(prior_mu, axis=0)
-        prior_log_sigma_sq_ = tf.expand_dims(prior_log_sigma_sq, axis=0)
-
-        nll_loss = \
-         0.5 * tf.reduce_mean(
-                tf.exp(- prior_log_sigma_sq_) * tf.square(representation_mu-prior_mu_),
-                axis=1
-         )
-
-        loss = tf.stop_gradient(reconstruction_loss) * (sensible_phi_loss * self.sensible_phi_coeff +nll_loss * self.nll_coeff + simplicity_loss * self.simplicity_coeff + ordering_loss * self.ordering_coeff) + reconstruction_loss
+        loss = tf.stop_gradient(results['reconstruction_loss']) * (results['sensible_phi_loss'] * self.sensible_phi_coeff +results['nll_loss'] * self.nll_coeff + results['simplicity_loss'] * self.simplicity_coeff + results['ordering_loss'] * self.ordering_coeff) + results['reconstruction_loss']
         if trainable:
 
 
@@ -702,11 +769,11 @@ class NonparametricOptimizer(object):
             optimizer = tf.train.AdamOptimizer(learning_rate)
             train_step = optimizer.minimize(tf.reduce_sum(loss))
 
-            return tf.reduce_sum(loss), train_step,  impedances,  representation_mu, reconstruction_loss
+            return tf.reduce_sum(loss), train_step,  impedances,  representation_mu, results['reconstruction_loss']
 
         else:
 
-            return tf.reduce_sum(loss), impedances, representation_mu, reconstruction_loss
+            return tf.reduce_sum(loss), impedances, representation_mu, results['reconstruction_loss']
 
 
 
@@ -721,11 +788,36 @@ class NonparametricOptimizer(object):
             indices=tf.expand_dims(indices, axis=1)
         )
         frequencies = inputs[:, :, 0]
-        impedances, z = self.build_forward(
-            frequencies=frequencies,
-            batch_size=batch_size,
-            indices=indices
+
+        model_meta_compressed = tf.gather_nd(
+            params=self.model_meta_compressed_matrix,
+            indices=tf.expand_dims(indices, axis=1)
         )
+        zarc_meta = tf.cast(
+            tf.sequence_mask(
+                lengths=model_meta_compressed[:, 2],
+                maxlen=3,
+            ),
+            dtype=tf.float32
+        )
+
+        model_meta = tf.concat(
+            (
+                tf.cast(model_meta_compressed[:, :2], dtype=tf.float32),
+                zarc_meta
+            ),
+            axis=1
+        )
+
+        impedances, z = self.build_forward(
+            frequencies=inputs[:, :, 0],
+            batch_size=batch_size,
+            indices=indices,
+            model_meta=model_meta
+
+        )
+
+
 
         valid_freqs_counts = tf.gather_nd(
             params=self.valid_freqs_counts_matrix,
@@ -740,7 +832,9 @@ class NonparametricOptimizer(object):
             'in_impedances':  inputs[:,:,1:],
             'out_impedances': impedances,
             'valid_freqs_counts':  valid_freqs_counts,
-            'parameters':  z
+            'parameters':  z,
+            'model_meta_compressed' : model_meta_compressed,
+
 
         }
 
@@ -784,12 +878,29 @@ def run_optimizer_on_data(cleaned_data, args, chunk_num):
     batch_size = tf.placeholder(dtype=tf.int32)
     prior_mu, prior_log_sigma_sq = Prior()
 
+    if args['inductance']:
+        inductance = 1
+    else:
+        inductance = 0
+
+    if args['zarc_inductance']:
+        zarc_inductance = 1
+    else:
+        zarc_inductance = 0
+
+
+
+    model_meta_compressed_global = tf.constant(numpy.array([inductance, zarc_inductance, args['num_zarcs']], dtype=numpy.int32))
+    model_meta_compressed = tf.tile(tf.expand_dims(model_meta_compressed_global, axis=0), multiples=[spectrum_count, 1])
+    print(model_meta_compressed)
+
     indices = tf.placeholder(shape=[None], dtype=tf.int32)
 
     model = NonparametricOptimizer(
         parameter_matrix=all_params,
         spectrum_matrix=all_spectra,
         valid_freqs_counts_matrix=all_valid_freqs_counts,
+        model_meta_compressed_matrix= model_meta_compressed,
     )
 
     loss, train_step, impedances, representation_mu, my_reconstruction_loss = \
@@ -911,7 +1022,10 @@ def finetune(args):
             'sensible_phi_coeff':args.sensible_phi_coeff,
             'simplicity_coeff':args.simplicity_coeff,
             'nll_coeff': args.nll_coeff,
-            'ordering_coeff':args.ordering_coeff
+            'ordering_coeff':args.ordering_coeff,
+            'num_zarcs': args.num_zarcs,
+            'inductance': args.inductance,
+            'zarc_inductance': args.zarc_inductance,
 
         },
         chunk_num=args.chunk_num*32
@@ -1234,10 +1348,23 @@ def train(args):
 
     input_impedances = inputs_fresh[:,:,1:]
 
-
-
-
-
+    model_meta_compressed = tf.concat(
+        (
+            tf.random.uniform(
+                [args.batch_size, 2],
+                minval=args.inductances_training_lower,
+                maxval=args.inductances_training_upper+1,
+                dtype=tf.int32,
+            ),
+            tf.random.uniform(
+                [args.batch_size, 1],
+                minval=args.num_zarcs_training_lower,
+                maxval=args.num_zarcs_training_upper+1,
+                dtype=tf.int32,
+            ),
+        ),
+        axis=1
+    )
 
     epsilon_scale = .1 * tf.random_uniform(shape=[batch_size], minval=-2., maxval=2., dtype=tf.float32)
     epsilon_frequency_translate = .5 * tf.random_uniform(shape=[batch_size], minval=-2., maxval=2., dtype=tf.float32)
@@ -1270,7 +1397,7 @@ def train(args):
     loss, zero_ops, accum_ops, train_step, test_ops, impedances, representation_mu, my_reconstruction_loss = \
         model.optimize_direct(inputs=inputs,
                               valid_freqs_counts=valid_freqs_counts,
-                              freqs_num=max_freq_num,
+                              model_meta_compressed=model_meta_compressed,
                               prior_mu=prior_mu,
                               prior_log_sigma_sq=prior_log_sigma_sq,
                               learning_rate=args.learning_rate,
@@ -1499,8 +1626,26 @@ def run_through_trained_model(cleaned_data, inverse_model_params, seed=None, chu
     number_of_zarcs = 3
     number_of_params = 1 + 1 + number_of_zarcs + 1 + 1 + 1 + number_of_zarcs + 1 + number_of_zarcs + 1 + 1
 
+    if inverse_model_params['inductance']:
+        inductance = 1
+    else:
+        inductance = 0
+
+    if inverse_model_params['zarc_inductance']:
+        zarc_inductance = 1
+    else:
+        zarc_inductance = 0
+
+
+
+
     batch_size = tf.placeholder(dtype=tf.int32)
     prior_mu, prior_log_sigma_sq = Prior()
+
+
+    model_meta_compressed_global = tf.constant([inductance, zarc_inductance, inverse_model_params['num_zarcs']])
+    model_meta_compressed = tf.tile(tf.expand_dims(model_meta_compressed_global, axis=0),multiples=[batch_size, 1])
+
 
     cleaned_data_lens = [len(c[0]) for c in cleaned_data]
     spectrum_count = len(cleaned_data_lens)
@@ -1532,7 +1677,7 @@ def run_through_trained_model(cleaned_data, inverse_model_params, seed=None, chu
     impedances, representation_mu = \
             model.optimize_direct(inputs=inputs,
                                   valid_freqs_counts=valid_freqs_counts,
-                                  freqs_num=max_freq_num,
+                                  model_meta_compressed=model_meta_compressed,
                                   prior_mu=prior_mu,
                                   prior_log_sigma_sq=prior_log_sigma_sq,
                                   batch_size=batch_size,
@@ -1625,6 +1770,9 @@ def run_inverse_model(args):
             'num_conv': args.num_conv,
             'conv_filters':args.conv_filters,
             'logdir':args.logdir,
+            'num_zarcs':args.num_zarcs,
+            'inductance':args.inductance,
+            'zarc_inductance':args.zarc_inductance,
         },
         seed=args.seed,
         chunk_num=args.chunk_num
@@ -1856,17 +2004,15 @@ if __name__ == '__main__':
 
     parser.add_argument('--percent_training', type=int, default=1)
 
-    parser.add_argument('--total_steps', type=int, default=250000)
+    parser.add_argument('--total_steps', type=int, default=500000)
     parser.add_argument('--checkpoint_every', type=int, default=1000)
     parser.add_argument('--log_every', type=int, default=1000)
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--nll_coeff', type=float, default=.1)
     parser.add_argument('--ordering_coeff', type=float, default=.5)
-    parser.add_argument('--simplicity_coeff', type=float, default=.1)
+    parser.add_argument('--simplicity_coeff', type=float, default=.01)
     parser.add_argument('--sensible_phi_coeff', type=float, default=1.)
-    parser.add_argument('--adam_beta1', type=float, default=.9)
-    parser.add_argument('--adam_beta2', type=float, default=.999)
-    parser.add_argument('--adam_epsilon', type=float, default=1e-8)
+
 
     parser.add_argument('--global_norm_clip', type=float, default=10.)
     parser.add_argument('--seed', type=int, default=13311772)
@@ -1900,6 +2046,22 @@ if __name__ == '__main__':
 
     parser.add_argument('--dummy_frequencies', type=int, default=0)
     parser.add_argument('--chunk_num', type=int, default=256)
+
+    parser.add_argument('--inductance', dest='inductance', action='store_true')
+    parser.add_argument('--no-inductance', dest='inductance', action='store_false')
+    parser.set_defaults(inductance=True)
+
+    parser.add_argument('--zarc-inductance', dest='zarc_inductance', action='store_true')
+    parser.add_argument('--no-zarc-inductance', dest='zarc_inductance', action='store_false')
+    parser.set_defaults(zarc_inductance=True)
+
+    parser.add_argument('--num_zarcs', type=int, default=3)
+
+    parser.add_argument('--num_zarcs_training_lower', type=int, default=3)
+    parser.add_argument('--num_zarcs_training_upper', type=int, default=3)
+
+    parser.add_argument('--inductances_training_lower', type=int, default=1)
+    parser.add_argument('--inductances_training_upper', type=int, default=1)
 
     args = parser.parse_args()
     if args.mode == 'train':
