@@ -999,10 +999,10 @@ def finetune(args):
 
 
     if args.use_compressed:
-        with open(os.path.join(".", "RealData", name_of_paths['results_compressed']), 'rb') as f:
+        with open(os.path.join(args.data_dir, name_of_paths['results_compressed']), 'rb') as f:
             results = pickle.load(f)
     else:
-        with open(os.path.join(".", "RealData", name_of_paths['results']), 'rb') as f:
+        with open(os.path.join(args.data_dir, name_of_paths['results']), 'rb') as f:
             results = pickle.load(f)
 
     cleaned_data = sorted(results, key=lambda x: len(x[0]))
@@ -1023,7 +1023,7 @@ def finetune(args):
     )
 
     j = 1000
-    with open(os.path.join(".", "RealData", name_of_paths['finetuned'].format(j)), 'wb') as f:
+    with open(os.path.join(args.data_dir, name_of_paths['finetuned'].format(j)), 'wb') as f:
         pickle.dump(results, f, pickle.HIGHEST_PROTOCOL)
 
 
@@ -1160,9 +1160,9 @@ def split_train_test_data(args, file_types=None):
         file_types = args.file_types
 
     name = names[file_types]
-    if not os.path.isfile(os.path.join(".", "RealData", name['database_split'].format(
+    if not os.path.isfile(os.path.join(args.data_dir, name['database_split'].format(
             args.percent_training))):
-        with open(os.path.join(".", "RealData", name['database']), 'rb') as f:
+        with open(os.path.join(args.data_dir, name['database']), 'rb') as f:
             database = pickle.load(f)
 
         # this is where we split in test and train.
@@ -1184,7 +1184,7 @@ def split_train_test_data(args, file_types=None):
             for test_key in test_keys:
                 split[test_key] = {'train':False}
 
-            with open(os.path.join(".", "RealData", name['database_split'].format(
+            with open(os.path.join(args.data_dir, name['database_split'].format(
                     args.percent_training)), 'wb') as f:
                  pickle.dump(split, f, pickle.HIGHEST_PROTOCOL)
 
@@ -1208,12 +1208,12 @@ def split_train_test_data(args, file_types=None):
                 for file_id in cell_id_groups[test_cell]:
                     split[file_id] = {'train': False}
 
-            with open(os.path.join(".", "RealData", name['database_split'].format(
+            with open(os.path.join(args.data_dir, name['database_split'].format(
                     args.percent_training)), 'wb') as f:
                 pickle.dump(split, f, pickle.HIGHEST_PROTOCOL)
 
     else:
-        with open(os.path.join(".", "RealData", name['database_split'].format(
+        with open(os.path.join(args.data_dir, name['database_split'].format(
                 args.percent_training)), 'rb') as f:
             split = pickle.load(f)
 
@@ -1235,7 +1235,7 @@ def train(args):
     split = split_train_test_data(args, file_types='fra')
     split_eis = split_train_test_data(args, file_types='eis')
 
-    with open(os.path.join(".", "RealData", "database.file"), 'rb') as f:
+    with open(os.path.join(args.data_dir, "database.file"), 'rb') as f:
         data = pickle.load(f)
 
     cleaned_data = []
@@ -1265,7 +1265,7 @@ def train(args):
     cleaned_data_lens = [len(c[0]) for c in cleaned_data]
 
 
-    with open(os.path.join(".", "RealData", "database_eis.file"), 'rb') as f:
+    with open(os.path.join(args.data_dir, "database_eis.file"), 'rb') as f:
         data_eis = pickle.load(f)
 
     cleaned_data_eis = []
@@ -1591,20 +1591,18 @@ list_of_labels = [
 
 def deparameterized_params(params):
 
-
-
     new_params = copy.deepcopy(params)
-    for i in range(7):
+    for i in range(INDEX_Q_WARBURG):
         new_params[i] = math.exp(new_params[i])
 
+    for i in range(INDEX_Q_WARBURG, INDEX_Q_WARBURG + 2):
+        #FIXED BUG: the minus sign comes from the definition of q from the paper such that Q = 1/exp(q)
+        new_params[i] = math.exp(-new_params[i])
 
-    first_mark = 1 + 1 + NUMBER_OF_ZARC + 2 + 1 + NUMBER_OF_ZARC
-    second_mark = first_mark + 1 + NUMBER_OF_ZARC
-
-    for i in range(first_mark,second_mark):
+    for i in range(INDEX_PHI_WARBURG,INDEX_PHI_INDUCTANCE):
         new_params[i] = 1./(1. + math.exp(-new_params[i]))
 
-    for i in range(second_mark, len(list_of_labels)):
+    for i in range(INDEX_PHI_INDUCTANCE, NUMBER_OF_PARAM):
 
         new_params[i] = -1./(1. + (new_params[i])**2.)
 
@@ -1724,7 +1722,7 @@ def run_inverse_model(args):
 
 
     split = split_train_test_data(args)
-    with open(os.path.join(".", "RealData", name_of_paths['database']), 'rb') as f:
+    with open(os.path.join(args.data_dir, name_of_paths['database']), 'rb') as f:
         data= pickle.load(f)
 
     cleaned_data = []
@@ -1748,7 +1746,7 @@ def run_inverse_model(args):
         cleaned_data.append((log_freq,re_z,im_z, file_id))
 
 
-    with open(os.path.join(".", "RealData", name_of_paths['database_augmented']), 'wb') as f:
+    with open(os.path.join(args.data_dir, name_of_paths['database_augmented']), 'wb') as f:
         pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
 
     results = run_through_trained_model(
@@ -1766,7 +1764,7 @@ def run_inverse_model(args):
         chunk_num=args.chunk_num
     )
 
-    with open(os.path.join(".", "RealData", name_of_paths['results']), 'wb') as f:
+    with open(os.path.join(args.data_dir, name_of_paths['results']), 'wb') as f:
         pickle.dump(results, f, pickle.HIGHEST_PROTOCOL)
 
 
@@ -1798,10 +1796,10 @@ def complexity_score(params):
     return complexity_loss
 
 def plot_to_scale(args):
-    with open(os.path.join(".", "RealData", "results_fine_tuned_with_adam_{}.file".format(args.plot_step)), 'rb') as f:
+    with open(os.path.join(args.data_dir, "results_fine_tuned_with_adam_{}.file".format(args.plot_step)), 'rb') as f:
         results = pickle.load(f)
 
-    with open(os.path.join(".", "RealData", "database_augmented.file"), 'rb') as f:
+    with open(os.path.join(args.data_dir, "database_augmented.file"), 'rb') as f:
         database = pickle.load(f)
 
 
@@ -1853,7 +1851,7 @@ def plot_to_scale(args):
 
 
 def plot_param_histo(args):
-    with open(os.path.join(".", "RealData", args.histogram_file), 'rb') as f:
+    with open(os.path.join(args.data_dir, args.histogram_file), 'rb') as f:
         results = pickle.load(f)
 
 
@@ -1907,9 +1905,9 @@ def get_cell_id_groups(database):
 
 
 def compress_data(args):
-    with open(os.path.join(".", args.data_dir, "results_of_inverse_model.file"), 'rb') as f:
+    with open(os.path.join( args.data_dir, "results_of_inverse_model.file"), 'rb') as f:
         results = pickle.load(f)
-    with open(os.path.join(".", args.data_dir, "database_augmented.file"), 'rb') as f:
+    with open(os.path.join( args.data_dir, "database_augmented.file"), 'rb') as f:
         database = pickle.load(f)
 
 
@@ -1952,9 +1950,9 @@ def compress_data(args):
     for id in compressed_ids:
         compressed_database[id] = database[id]
 
-    with open(os.path.join(".", args.data_dir, "results_compressed.file"), 'wb') as f:
+    with open(os.path.join( args.data_dir, "results_compressed.file"), 'wb') as f:
         pickle.dump(compressed_result, f, pickle.HIGHEST_PROTOCOL)
-    with open(os.path.join(".", args.data_dir, "database_compressed.file"), 'wb') as f:
+    with open(os.path.join( args.data_dir, "database_compressed.file"), 'wb') as f:
         pickle.dump(compressed_database, f, pickle.HIGHEST_PROTOCOL)
 
 

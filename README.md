@@ -3,6 +3,8 @@
 Recent Changes:
 Now, many equivalent circuits are implemented. 
 
+## Important Bugs Fixed
+- the parameters 'Q warburg' and 'Q inductance' used to be outputted as 1/Q instead. This is now fixed. 
 # Usage
 
 The current version of the software comes with a pretrained model, 
