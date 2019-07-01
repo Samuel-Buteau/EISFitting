@@ -88,8 +88,7 @@ def get_finetune_results_or_none(inv_model_result, args):
 
 
 def import_process_output(args):
-    number_of_zarcs = 3
-    number_of_params = 1 + 1 + number_of_zarcs + 1 + 1 + 1 + number_of_zarcs + 1 + number_of_zarcs + 1 + 1
+
     print('starting up...')
     if not os.path.exists(args['input_dir']):
         print('Please provide a valid value for --input_dir')
@@ -606,11 +605,6 @@ class Command(BaseCommand):
         parser.add_argument('--num_zarcs', type=int, default=3)
 
     def handle(self, *args, **options):
-        if options['mode'] == 'import_directory':
-            import_directory(options)
-        if options['mode'] == 'run_inverse_model_on_user_spectra':
-            run_inverse_model_on_user_spectra(options)
-        if options['mode'] == 'finetune':
-            finetune(options)
+        
         if options['mode'] == 'import_process_output':
             import_process_output(options)

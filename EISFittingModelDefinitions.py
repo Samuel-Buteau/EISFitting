@@ -126,7 +126,7 @@ def Prior():
     return mu,log_square_sigma
 
 
-#TODO: make some components maskable
+
 def ImpedanceModel(params_, frequencies_, batch_size, model_meta=None):
     '''
 
@@ -138,185 +138,89 @@ def ImpedanceModel(params_, frequencies_, batch_size, model_meta=None):
     :return:
     '''
 
-    if model_meta is None:
-        params = tf.to_double(params_)
-        frequencies = tf.to_double(frequencies_)
-        # params: {r, r_zarc_inductance, r_zarc_i...
-        # ... q_warburg, q_inductance
-        # ... w_c_inductance, w_c_zarc_i...
-        # ... phi_warburg, phi_zarc_i...
-        # ... phi_inductance, phi_zarc_inductance
 
-        params_reshaped = tf.expand_dims(params, axis=2)
+    model_meta = tf.to_double(model_meta)
 
-        batch_zeros = tf.zeros([batch_size, 1], dtype = tf.float64)
-        full_zeros = tf.zeros_like(frequencies, dtype = tf.float64)
+    params = tf.to_double(params_)
+    frequencies = tf.to_double(frequencies_)
 
+    params_reshaped = tf.expand_dims(params, axis=2)
 
-        first_mark =INDEX_PHI_WARBURG
-        second_mark = INDEX_PHI_INDUCTANCE
-
-
-        params_to_exp = tf.exp(params_reshaped[:, :first_mark])
-        params_to_sigm = tf.sigmoid(params_reshaped[:, first_mark:second_mark])
-        params_to_neg_sigm = -1./(1. + tf.square(params_reshaped[:, second_mark:]))
-
-        '''
-           - Resistor, parameters {R}: Z(W) = R + i * 0
-           - Constant Phase Element, parameters {q, phi}: Z(W) = exp(q) * W^-Phi * (i)^-Phi 
-           - Zarc, parameters {R, W_c, Phi}: Z(W) = R/(1 + (i W/W_c)^(Phi))
-    
-    
-        '''
-        exp_frequencies = tf.exp(frequencies)
-
-        R = params_to_exp[:,0]
-
-
-        impedance = tf.complex(full_zeros + R,full_zeros)
-
-        imaginary_unit = tf.to_complex128(tf.complex(0.,1.))
-
-        # warburg
-        phi = params_to_sigm[:,0]
-        exp_q = params_to_exp[:,5]
-
-        bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
-        real_bad_piece = tf.real(bad_piece)
-        imag_bad_piece = tf.imag(bad_piece)
-        bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
-
-        impedance += tf.complex(
-            real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
-                   )
-
-        # inductance
-        phi = params_to_neg_sigm[:,0]
-        exp_q = params_to_exp[:, 6]
-
-        bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
-        real_bad_piece = tf.real(bad_piece)
-        imag_bad_piece = tf.imag(bad_piece)
-        bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
-
-        impedance += tf.complex(
-            real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
-                   )
-
-        #inductance zarc
-        phi = tf.complex(params_to_neg_sigm[:,1], batch_zeros)
-        w_c = tf.complex(params_to_exp[:,7], batch_zeros)
-        r = tf.complex(params_to_exp[:,1], batch_zeros)
-        imag_freq = tf.complex(full_zeros, exp_frequencies)
-
-        impedance += r/(1. + tf.pow((imag_freq/w_c), phi))
-
-
-        for index in range(3):
-            # zarc
-            phi = tf.complex(params_to_sigm[:, 1+index], batch_zeros)
-            w_c = tf.complex(params_to_exp[:, 8+index], batch_zeros)
-            r = tf.complex(params_to_exp[:, 2+index], batch_zeros)
-
-            impedance += r / (1. + tf.pow((imag_freq / w_c), phi))
+    batch_zeros = tf.zeros([batch_size, 1], dtype=tf.float64)
+    full_zeros = tf.zeros_like(frequencies, dtype=tf.float64)
 
 
 
-        impedance_real = tf.real(impedance)
-        impedance_imag = tf.imag(impedance)
+    params_to_exp = tf.exp(params_reshaped[:, :INDEX_PHI_WARBURG])
+    params_to_sigm = tf.sigmoid(params_reshaped[:, INDEX_PHI_WARBURG:INDEX_PHI_INDUCTANCE])
+    params_to_neg_sigm = -1. / (1. + tf.square(params_reshaped[:, INDEX_PHI_INDUCTANCE:]))
 
-        impedance_stacked = tf.to_float(tf.stack([impedance_real,impedance_imag], axis=2))
+    processed_params = tf.concat([params_to_exp, params_to_sigm, params_to_neg_sigm], axis=1)
 
-        return impedance_stacked
-
-    else:
-        model_meta = tf.to_double(model_meta)
-
-        params = tf.to_double(params_)
-        frequencies = tf.to_double(frequencies_)
-        # params: {r, r_zarc_inductance, r_zarc_i...
-        # ... q_warburg, q_inductance
-        # ... w_c_inductance, w_c_zarc_i...
-        # ... phi_warburg, phi_zarc_i...
-        # ... phi_inductance, phi_zarc_inductance
+    '''
+       - Resistor, parameters {R}: Z(W) = R + i * 0
+       - Constant Phase Element, parameters {q, phi}: Z(W) = exp(q) * W^-Phi * (i)^-Phi 
+       - Zarc, parameters {R, W_c, Phi}: Z(W) = R/(1 + (i W/W_c)^(Phi))
 
 
-        params_reshaped = tf.expand_dims(params, axis=2)
+    '''
+    exp_frequencies = tf.exp(frequencies)
 
-        batch_zeros = tf.zeros([batch_size, 1], dtype=tf.float64)
-        full_zeros = tf.zeros_like(frequencies, dtype=tf.float64)
+    R = processed_params[:, INDEX_R]
 
-        first_mark = INDEX_PHI_WARBURG
-        second_mark = INDEX_PHI_INDUCTANCE
+    impedance = tf.complex(full_zeros + R, full_zeros)
 
-        params_to_exp = tf.exp(params_reshaped[:, :first_mark])
-        params_to_sigm = tf.sigmoid(params_reshaped[:, first_mark:second_mark])
-        params_to_neg_sigm = -1. / (1. + tf.square(params_reshaped[:, second_mark:]))
+    imaginary_unit = tf.to_complex128(tf.complex(0., 1.))
 
-        '''
-           - Resistor, parameters {R}: Z(W) = R + i * 0
-           - Constant Phase Element, parameters {q, phi}: Z(W) = exp(q) * W^-Phi * (i)^-Phi 
-           - Zarc, parameters {R, W_c, Phi}: Z(W) = R/(1 + (i W/W_c)^(Phi))
+    # warburg
+    phi = processed_params[:, INDEX_PHI_WARBURG]
+    exp_q = processed_params[:, INDEX_Q_WARBURG]
 
+    bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
+    real_bad_piece = tf.real(bad_piece)
+    imag_bad_piece = tf.imag(bad_piece)
+    bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
 
-        '''
-        exp_frequencies = tf.exp(frequencies)
+    impedance += tf.complex(
+        real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
+    )
 
-        R = params_to_exp[:, 0]
+    # inductance
+    phi = processed_params[:, INDEX_PHI_INDUCTANCE]
+    exp_q = processed_params[:, INDEX_Q_INDUCTANCE] * tf.expand_dims(model_meta[:, MODEL_META_INDUCTANCE],axis=1)
 
-        impedance = tf.complex(full_zeros + R, full_zeros)
+    bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
+    real_bad_piece = tf.real(bad_piece)
+    imag_bad_piece = tf.imag(bad_piece)
+    bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
 
-        imaginary_unit = tf.to_complex128(tf.complex(0., 1.))
+    impedance +=  tf.complex(
+        real_bad_piece * bad_piece2,
+        imag_bad_piece * bad_piece2
+    )
 
-        # warburg
-        phi = params_to_sigm[:, 0]
-        exp_q = params_to_exp[:, 5]
+    # inductance zarc
+    phi = tf.complex(processed_params[:, INDEX_PHI_ZARC_INDUCTANCE], batch_zeros)
+    w_c = tf.complex(processed_params[:, INDEX_W_C_INDUCTANCE], batch_zeros)
+    r = tf.complex(processed_params[:, INDEX_R_ZARC_INDUCTANCE] * tf.expand_dims(model_meta[:, MODEL_META_ZARC_INDUCTANCE],axis=1), batch_zeros)
+    imag_freq = tf.complex(full_zeros, exp_frequencies)
 
-        bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
-        real_bad_piece = tf.real(bad_piece)
-        imag_bad_piece = tf.imag(bad_piece)
-        bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
+    impedance += r / (1. + tf.pow((imag_freq / w_c), phi))
 
-        impedance += tf.complex(
-            real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
-        )
-
-        # inductance
-        phi = params_to_neg_sigm[:, 0]
-        exp_q = params_to_exp[:, 6] * tf.expand_dims(model_meta[:, MODEL_META_INDUCTANCE],axis=1)
-
-        bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
-        real_bad_piece = tf.real(bad_piece)
-        imag_bad_piece = tf.imag(bad_piece)
-        bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
-
-        impedance +=  tf.complex(
-            real_bad_piece * bad_piece2,
-            imag_bad_piece * bad_piece2
-        )
-
-        # inductance zarc
-        phi = tf.complex(params_to_neg_sigm[:, 1], batch_zeros)
-        w_c = tf.complex(params_to_exp[:, 7], batch_zeros)
-        r = tf.complex(params_to_exp[:, 1] * tf.expand_dims(model_meta[:, MODEL_META_ZARC_INDUCTANCE],axis=1), batch_zeros)
-        imag_freq = tf.complex(full_zeros, exp_frequencies)
+    for index in range(NUMBER_OF_ZARC):
+        # zarc
+        phi = tf.complex(processed_params[:, INDEX_PHI_ZARC_OFFSET + index], batch_zeros)
+        w_c = tf.complex(processed_params[:, INDEX_W_C_ZARC_OFFSET + index], batch_zeros)
+        r = tf.complex(processed_params[:, INDEX_R_ZARC_OFFSET + index] * tf.expand_dims(model_meta[:, MODEL_META_ZARC + index],axis=1), batch_zeros)
 
         impedance += r / (1. + tf.pow((imag_freq / w_c), phi))
 
-        for index in range(3):
-            # zarc
-            phi = tf.complex(params_to_sigm[:, 1 + index], batch_zeros)
-            w_c = tf.complex(params_to_exp[:, 8 + index], batch_zeros)
-            r = tf.complex(params_to_exp[:, 2 + index] * tf.expand_dims(model_meta[:, MODEL_META_ZARC + index],axis=1), batch_zeros)
+    impedance_real = tf.real(impedance)
+    impedance_imag = tf.imag(impedance)
 
-            impedance += r / (1. + tf.pow((imag_freq / w_c), phi))
+    impedance_stacked = tf.to_float(tf.stack([impedance_real, impedance_imag], axis=2))
 
-        impedance_real = tf.real(impedance)
-        impedance_imag = tf.imag(impedance)
-
-        impedance_stacked = tf.to_float(tf.stack([impedance_real, impedance_imag], axis=2))
-
-        return impedance_stacked
+    return impedance_stacked
 
 
 
@@ -1565,13 +1469,13 @@ def original_spectrum(spectrum, params):
 
 def restore_params(params, shift_scale):
     new_params = copy.deepcopy(params)
-    for i in range(5):
+    for i in range(INDEX_Q_WARBURG):
         new_params[i] = new_params[i] + shift_scale['r_alpha']
 
-    new_params[5] = new_params[5] + shift_scale['r_alpha'] + (1./(1. + math.exp(-new_params[11]))) * shift_scale['w_alpha']
-    new_params[6] = new_params[6] + shift_scale['r_alpha'] - (1./(1. + (new_params[15])**2.)) * shift_scale['w_alpha']
-    for i in range(4):
-        new_params[7+i] = new_params[7+i] + shift_scale['w_alpha']
+    new_params[INDEX_Q_WARBURG] = new_params[INDEX_Q_WARBURG] + shift_scale['r_alpha'] + (1./(1. + math.exp(-new_params[INDEX_PHI_WARBURG]))) * shift_scale['w_alpha']
+    new_params[INDEX_Q_INDUCTANCE] = new_params[INDEX_Q_INDUCTANCE] + shift_scale['r_alpha'] - (1./(1. + (new_params[INDEX_PHI_INDUCTANCE])**2.)) * shift_scale['w_alpha']
+    for i in range(INDEX_W_C_INDUCTANCE, INDEX_PHI_WARBURG):
+        new_params[i] = new_params[i] + shift_scale['w_alpha']
 
     return new_params
 
