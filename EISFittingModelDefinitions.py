@@ -7,7 +7,7 @@ import numpy
 import math
 import matplotlib.pyplot as plt
 import pickle
-from MyConstants import NUMBER_OF_ZARC, NUMBER_OF_PARAM, MODEL_META_INDUCTANCE,MODEL_META_ZARC_INDUCTANCE,MODEL_META_ZARC, INDEX_R, INDEX_R_ZARC_INDUCTANCE, INDEX_R_ZARC_OFFSET, INDEX_Q_WARBURG, INDEX_Q_INDUCTANCE, INDEX_W_C_INDUCTANCE, INDEX_W_C_ZARC_OFFSET, INDEX_PHI_WARBURG, INDEX_PHI_ZARC_OFFSET, INDEX_PHI_INDUCTANCE, INDEX_PHI_ZARC_INDUCTANCE
+from MyConstants import NUMBER_OF_ZARC, NUMBER_OF_PARAM, MODEL_META_INDUCTANCE,MODEL_META_ZARC_INDUCTANCE,MODEL_META_WARBURG_INCEPTION, MODEL_META_ZARC, INDEX_R, INDEX_R_ZARC_INDUCTANCE, INDEX_R_ZARC_OFFSET, INDEX_Q_WARBURG, INDEX_Q_INDUCTANCE, INDEX_W_C_INDUCTANCE, INDEX_W_C_ZARC_OFFSET, INDEX_PHI_WARBURG, INDEX_PHI_ZARC_OFFSET, INDEX_PHI_INDUCTANCE, INDEX_PHI_ZARC_INDUCTANCE
 
 """
 wider Conv Residual Block
@@ -179,11 +179,13 @@ def ImpedanceModel(params_, frequencies_, batch_size, model_meta=None):
     bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
     real_bad_piece = tf.real(bad_piece)
     imag_bad_piece = tf.imag(bad_piece)
-    bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
+    bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi) *tf.expand_dims(1. - model_meta[:, MODEL_META_WARBURG_INCEPTION], axis=1)
 
-    impedance += tf.complex(
+    warburg_impedance = tf.complex(
         real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
     )
+
+    impedance += warburg_impedance
 
     # inductance
     phi = processed_params[:, INDEX_PHI_INDUCTANCE]
@@ -213,7 +215,21 @@ def ImpedanceModel(params_, frequencies_, batch_size, model_meta=None):
         w_c = tf.complex(processed_params[:, INDEX_W_C_ZARC_OFFSET + index], batch_zeros)
         r = tf.complex(processed_params[:, INDEX_R_ZARC_OFFSET + index] * tf.expand_dims(model_meta[:, MODEL_META_ZARC + index],axis=1), batch_zeros)
 
-        impedance += r / (1. + tf.pow((imag_freq / w_c), phi))
+
+        if index == 0:
+            bad_piece2 = (exp_q/processed_params[:, INDEX_R_ZARC_OFFSET + index]) * tf.pow(exp_frequencies, -phi) * tf.expand_dims(
+                model_meta[:, MODEL_META_WARBURG_INCEPTION], axis=1)
+
+            warburg_impedance = tf.complex(
+                real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
+            )
+
+            impedance += r / (
+                    tf.complex(1.,0.)/(tf.complex(1.,0.) + warburg_impedance) +
+                    tf.pow((imag_freq / w_c), phi))
+
+        else:
+            impedance += r / (1. + tf.pow((imag_freq / w_c), phi))
 
     impedance_real = tf.real(impedance)
     impedance_imag = tf.imag(impedance)
@@ -291,34 +307,19 @@ def get_losses(representation_mu, inputs, masks_float, impedances, zarc_meta,bat
     prior_log_sigma_sq_ = tf.expand_dims(prior_log_sigma_sq, axis=0)
 
 
-    '''
-    
-    - (index 0) r, the ohmic resistor. Reparameterized such that the actual resistance is exp(r)
-    - (index 1) r_zarc_inductance, the resistance of the inductance zarc. Reparameterized such that actual resistance is exp(r_zarc_inductance)
-    - (index 2:2+num_zarcs) [r_zarc_1, r_zarc_2, r_zarc_3], the 3 resistances of the electrochemical zarcs. Reparameterized.
-    - (index 2+numzarcs) q_warburg
-    - (index 2 + num_zarcs + 1) q_inductance
-    - (index 2 + num_zarcs + 2) w_c_inductance
-    - (index 2 + num_zarcs + 3: 2 + num_zarcs + 3 + num_zarcs) [w_c_zarc_1, w_c_zarc_2, w_c_zarc_3]
-    - (index 2 + num_zarcs + 3 + num_zarcs) phi_warburg
-    - (index 2 + num_zarcs + 3 + num_zarcs + 1: 2 + num_zarcs + 3 + num_zarcs + 1 + num_zarcs)[phi_zarc_1, phi_zarc_2, phi_zarc_3]
-    - (index 2 + num_zarcs + 3 + num_zarcs + 1 + num_zarcs) phi_inductance
-    - (index 2 + num_zarcs + 3 + num_zarcs + 1 + num_zarcs + 1) phi_zarc_inductance
-    
-    
-    '''
+
 
     full_mask = tf.concat([
         tf.ones(shape=[batch_size, 1], dtype=tf.float32),
-        model_meta[:,1:1+1],
+        model_meta[:,MODEL_META_ZARC_INDUCTANCE:MODEL_META_ZARC_INDUCTANCE+1],
         zarc_meta,
         tf.ones(shape=[batch_size, 1], dtype=tf.float32),
-        model_meta[:, 0:0 + 1],
-        model_meta[:, 1:1 + 1],
+        model_meta[:, MODEL_META_INDUCTANCE :MODEL_META_INDUCTANCE  + 1],
+        model_meta[:, MODEL_META_ZARC_INDUCTANCE:MODEL_META_ZARC_INDUCTANCE + 1],
         zarc_meta,
         tf.ones(shape=[batch_size, 1], dtype=tf.float32),
         zarc_meta,
-        model_meta[:, 0:1 + 1],
+        model_meta[:, MODEL_META_INDUCTANCE :MODEL_META_INDUCTANCE  + 2],
     ], axis=1)
 
     nll_loss = \
@@ -335,6 +336,28 @@ def get_losses(representation_mu, inputs, masks_float, impedances, zarc_meta,bat
         'simplicity_loss':simplicity_loss,
         'complexity_metric':complexity_metric
     }
+
+
+def uncompress_model_meta(model_meta_compressed):
+    zarc_meta = tf.cast(
+            tf.sequence_mask(
+            lengths=model_meta_compressed[:,MODEL_META_ZARC],
+            maxlen=NUMBER_OF_ZARC,
+        ),
+        dtype=tf.float32
+    )
+
+
+    model_meta = tf.concat(
+        (
+            tf.cast(model_meta_compressed[:,:MODEL_META_ZARC], dtype=tf.float32),
+            zarc_meta
+        ),
+        axis=1
+    )
+    return {'zarc_meta': zarc_meta, 'model_meta':model_meta}
+
+
 
 class ParameterVAE(object):
 
@@ -456,24 +479,9 @@ class ParameterVAE(object):
 
         masks_float = tf.cast(masks_logical,dtype=tf.float32)
 
-        zarc_meta = tf.cast(
-                tf.sequence_mask(
-                lengths=model_meta_compressed[:,2],
-                maxlen=3,
-            ),
-            dtype=tf.float32
-        )
+        uncompressed_model_meta = uncompress_model_meta(model_meta_compressed)
 
-
-        model_meta = tf.concat(
-            (
-                tf.cast(model_meta_compressed[:,:2], dtype=tf.float32),
-                zarc_meta
-            ),
-            axis=1
-        )
-
-        impedances, representation_mu = self.build_forward(inputs, masks_logical, model_meta=model_meta,
+        impedances, representation_mu = self.build_forward(inputs, masks_logical, model_meta=uncompressed_model_meta['model_meta'],
                                                            batch_size=batch_size, priors=prior_mu,
                                                            freq_counts=true_freqs_num)
 
@@ -482,16 +490,18 @@ class ParameterVAE(object):
             return impedances, representation_mu
         else:
 
-            results = get_losses(representation_mu,
-                       inputs,
-                       masks_float,
-                       impedances,
-                       zarc_meta,
-                       batch_size,
-                       valid_freqs_counts,
-                       prior_mu,
-                       prior_log_sigma_sq,
-                       model_meta)
+            results = get_losses(
+                representation_mu,
+                inputs,
+                masks_float,
+                impedances,
+                uncompressed_model_meta['zarc_meta'],
+                batch_size,
+                valid_freqs_counts,
+                prior_mu,
+                prior_log_sigma_sq,
+                uncompressed_model_meta['model_meta'],
+             )
 
 
             loss = tf.reduce_mean(
@@ -604,32 +614,19 @@ class NonparametricOptimizer(object):
             params=self.model_meta_compressed_matrix,
             indices=tf.expand_dims(indices, axis=1)
         )
+        uncompressed_model_meta = uncompress_model_meta(model_meta_compressed)
 
         true_freqs_num = tf.reduce_max(valid_freqs_counts)
         inputs = inputs[:, :true_freqs_num, :]
 
-        zarc_meta = tf.cast(
-            tf.sequence_mask(
-                lengths=model_meta_compressed[:, 2],
-                maxlen=3,
-            ),
-            dtype=tf.float32
-        )
 
-        model_meta = tf.concat(
-            (
-                tf.cast(model_meta_compressed[:, :2], dtype=tf.float32),
-                zarc_meta
-            ),
-            axis=1
-        )
 
 
         impedances, representation_mu = self.build_forward(
             frequencies=inputs[:,:,0],
             batch_size=batch_size,
             indices=indices,
-            model_meta=model_meta
+            model_meta=uncompressed_model_meta['model_meta']
 
         )
 
@@ -644,12 +641,12 @@ class NonparametricOptimizer(object):
                              inputs,
                              masks_float,
                              impedances,
-                             zarc_meta,
+                             uncompressed_model_meta['zarc_meta'],
                              batch_size,
                              valid_freqs_counts,
                              prior_mu,
                              prior_log_sigma_sq,
-                             model_meta
+                             uncompressed_model_meta['model_meta']
         )
 
 
@@ -689,27 +686,13 @@ class NonparametricOptimizer(object):
             params=self.model_meta_compressed_matrix,
             indices=tf.expand_dims(indices, axis=1)
         )
-        zarc_meta = tf.cast(
-            tf.sequence_mask(
-                lengths=model_meta_compressed[:, 2],
-                maxlen=3,
-            ),
-            dtype=tf.float32
-        )
-
-        model_meta = tf.concat(
-            (
-                tf.cast(model_meta_compressed[:, :2], dtype=tf.float32),
-                zarc_meta
-            ),
-            axis=1
-        )
+        uncompressed_model_meta = uncompress_model_meta(model_meta_compressed)
 
         impedances, z = self.build_forward(
             frequencies=inputs[:, :, 0],
             batch_size=batch_size,
             indices=indices,
-            model_meta=model_meta
+            model_meta=uncompressed_model_meta['model_meta']
 
         )
 
@@ -783,9 +766,14 @@ def run_optimizer_on_data(cleaned_data, args, chunk_num):
     else:
         zarc_inductance = 0
 
+    if args['warburg_inception']:
+        warburg_inception = 1
+    else:
+        warburg_inception = 0
 
 
-    model_meta_compressed_global = tf.constant(numpy.array([inductance, zarc_inductance, args['num_zarcs']], dtype=numpy.int32))
+
+    model_meta_compressed_global = tf.constant(numpy.array([inductance, zarc_inductance, warburg_inception, args['num_zarcs']], dtype=numpy.int32))
     model_meta_compressed = tf.tile(tf.expand_dims(model_meta_compressed_global, axis=0), multiples=[spectrum_count, 1])
     print(model_meta_compressed)
 
@@ -920,6 +908,7 @@ def finetune(args):
             'ordering_coeff':args.ordering_coeff,
             'num_zarcs': args.num_zarcs,
             'inductance': args.inductance,
+            'warburg_inception': args.warburg_inception,
             'zarc_inductance': args.zarc_inductance,
 
         },
@@ -1252,10 +1241,17 @@ def train(args):
             ),
             tf.random.uniform(
                 [args.batch_size, 1],
+                minval=args.inception_training_lower,
+                maxval=args.inception_training_upper + 1,
+                dtype=tf.int32,
+            ),
+            tf.random.uniform(
+                [args.batch_size, 1],
                 minval=args.num_zarcs_training_lower,
                 maxval=args.num_zarcs_training_upper+1,
                 dtype=tf.int32,
             ),
+
         ),
         axis=1
     )
@@ -1690,8 +1686,8 @@ def real_score(in_imp, fit_imp):
         (numpy.expand_dims(numpy.array([real_scale, imag_scale]), axis=0) * (in_imp - fit_imp)) ** 2.)) ** (1. / 2.)
 
 def complexity_score(params):
-    num_zarcs = 3
-    rs = params[2:2 + num_zarcs]
+
+    rs = params[INDEX_R_ZARC_OFFSET:INDEX_R_ZARC_OFFSET + NUMBER_OF_ZARC]
 
     l_half = numpy.square(numpy.sum(numpy.exp(.5 * rs)))
     l_1 = numpy.sum(numpy.exp(rs))
@@ -1915,35 +1911,39 @@ if __name__ == '__main__':
     parser.add_argument('--histogram_file', default='results_of_inverse_model.file')
 
     parser.add_argument('--new_logdir', dest='new_logdir', action='store_true')
-    parser.add_argument('--no-new_logdir', dest='new_logdir', action='store_false')
+    parser.add_argument('--no_new_logdir', dest='new_logdir', action='store_false')
     parser.set_defaults(new_logdir=False)
 
     parser.add_argument('--visuals', dest='visuals', action='store_true')
-    parser.add_argument('--no-visuals', dest='visuals', action='store_false')
+    parser.add_argument('--no_visuals', dest='visuals', action='store_false')
     parser.set_defaults(visuals=False)
 
     parser.add_argument('--list_variables', dest='list_variables', action='store_true')
-    parser.add_argument('--no-list_variables', dest='list_variables', action='store_false')
+    parser.add_argument('--no_list_variables', dest='list_variables', action='store_false')
     parser.set_defaults(list_variables=False)
 
     parser.add_argument('--use_compressed', dest='use_compressed', action='store_true')
-    parser.add_argument('--no-use_compressed', dest='use_compressed', action='store_false')
+    parser.add_argument('--no_use_compressed', dest='use_compressed', action='store_false')
     parser.set_defaults(use_compressed=False)
 
     parser.add_argument('--test_fake_data', dest='test_fake_data', action='store_true')
-    parser.add_argument('--no-test_fake_data', dest='test_fake_data', action='store_false')
+    parser.add_argument('--no_test_fake_data', dest='test_fake_data', action='store_false')
     parser.set_defaults(test_fake_data=False)
 
     parser.add_argument('--dummy_frequencies', type=int, default=0)
     parser.add_argument('--chunk_num', type=int, default=256)
 
     parser.add_argument('--inductance', dest='inductance', action='store_true')
-    parser.add_argument('--no-inductance', dest='inductance', action='store_false')
+    parser.add_argument('--no_inductance', dest='inductance', action='store_false')
     parser.set_defaults(inductance=True)
 
-    parser.add_argument('--zarc-inductance', dest='zarc_inductance', action='store_true')
-    parser.add_argument('--no-zarc-inductance', dest='zarc_inductance', action='store_false')
+    parser.add_argument('--zarc_inductance', dest='zarc_inductance', action='store_true')
+    parser.add_argument('--no_zarc_inductance', dest='zarc_inductance', action='store_false')
     parser.set_defaults(zarc_inductance=True)
+
+    parser.add_argument('--warburg_inception', dest='warburg_inception', action='store_true')
+    parser.add_argument('--no_warburg_inception', dest='warburg_inception', action='store_false')
+    parser.set_defaults(warburg_inception=True)
 
     parser.add_argument('--num_zarcs', type=int, default=3)
 
@@ -1952,6 +1952,9 @@ if __name__ == '__main__':
 
     parser.add_argument('--inductances_training_lower', type=int, default=1)
     parser.add_argument('--inductances_training_upper', type=int, default=1)
+    parser.add_argument('--inception_training_lower', type=int, default=1)
+    parser.add_argument('--inception_training_upper', type=int, default=1)
+
 
     args = parser.parse_args()
     if args.mode == 'train':

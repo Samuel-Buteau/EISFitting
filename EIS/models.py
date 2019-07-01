@@ -56,11 +56,6 @@ class CircuitParameter(models.Model):
 
 
 
-# params: {r, r_zarc_inductance, r_zarc_i...
-# ... q_warburg, q_inductance
-# ... w_c_inductance, w_c_zarc_i...
-# ... phi_warburg, phi_zarc_i...
-# ... phi_inductance, phi_zarc_inductance
 
 class ShiftScaleParameters(models.Model):
     r_alpha = models.FloatField(default=0)
@@ -193,6 +188,7 @@ class InverseModelResult(models.Model):
 
     inductance = models.BooleanField(default=False)
     zarc_inductance = models.BooleanField(default=False)
+    warburg_inception = models.BooleanField(default=False)
     num_zarcs = models.IntegerField(default=3)
 
     activity_setting = models.OneToOneField(
