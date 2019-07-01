@@ -173,13 +173,11 @@ def ImpedanceModel(params_, frequencies_, batch_size, model_meta=None):
     imaginary_unit = tf.to_complex128(tf.complex(0., 1.))
 
     # warburg
-    phi = processed_params[:, INDEX_PHI_WARBURG]
-    exp_q = processed_params[:, INDEX_Q_WARBURG]
 
-    bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
+    bad_piece = tf.pow(imaginary_unit, tf.complex(-processed_params[:, INDEX_PHI_WARBURG], batch_zeros))
     real_bad_piece = tf.real(bad_piece)
     imag_bad_piece = tf.imag(bad_piece)
-    bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi) *tf.expand_dims(1. - model_meta[:, MODEL_META_WARBURG_INCEPTION], axis=1)
+    bad_piece2 = processed_params[:, INDEX_Q_WARBURG] * tf.pow(exp_frequencies, -processed_params[:, INDEX_PHI_WARBURG]) *tf.expand_dims(1. - model_meta[:, MODEL_META_WARBURG_INCEPTION], axis=1)
 
     warburg_impedance = tf.complex(
         real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
@@ -217,15 +215,39 @@ def ImpedanceModel(params_, frequencies_, batch_size, model_meta=None):
 
 
         if index == 0:
-            bad_piece2 = (exp_q/processed_params[:, INDEX_R_ZARC_OFFSET + index]) * tf.pow(exp_frequencies, -phi) * tf.expand_dims(
+            bad_piece2 = (processed_params[:, INDEX_Q_WARBURG]/processed_params[:, INDEX_R_ZARC_OFFSET + index]) * tf.pow(
+                exp_frequencies,
+                -processed_params[:,INDEX_PHI_WARBURG]
+            ) * tf.expand_dims(
                 model_meta[:, MODEL_META_WARBURG_INCEPTION], axis=1)
 
             warburg_impedance = tf.complex(
                 real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2
             )
 
+            complex_one = tf.cast(tf.complex(1.,0.), dtype=tf.complex128)
+            #TODO: fix this error:
+            '''
+            
+
+                NotFoundError (see above for traceback): No registered 'Reciprocal' OpKernel for GPU devices compatible with node node truediv_4 (defined at EISFittingModelDefinitions.py:235)  = Reciprocal[T=DT_COMPLEX128, _device="/job:localhost/replica:0/task:0/device:GPU:0"](add_11)
+                 (OpKernel was found, but attributes didn't match)
+                .  Registered:  device='CPU'; T in [DT_FLOAT]
+                device='CPU'; T in [DT_HALF]
+                device='CPU'; T in [DT_DOUBLE]
+                device='CPU'; T in [DT_COMPLEX64]
+                device='CPU'; T in [DT_COMPLEX128]
+                device='GPU'; T in [DT_FLOAT]
+                device='GPU'; T in [DT_HALF]
+                device='GPU'; T in [DT_DOUBLE]
+                device='GPU'; T in [DT_INT64]
+                
+                 [[node truediv_4 (defined at EISFittingModelDefinitions.py:235)  = Reciprocal[T=DT_COMPLEX128, _device="/job:localhost/replica:0/task:0/device:GPU:0"](add_11)]]
+
+            
+            '''
             impedance += r / (
-                    tf.complex(1.,0.)/(tf.complex(1.,0.) + warburg_impedance) +
+                (1./(1. + warburg_impedance)) +
                     tf.pow((imag_freq / w_c), phi))
 
         else:
