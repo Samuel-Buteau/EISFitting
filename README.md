@@ -87,18 +87,7 @@ These can both be passed if both components are desired.
 see requirements.txt
 install the requirements by running on the command line "pip install *something*" with *something* substituted for a requirement.
 
-# Investigation and New Features
-
-we saw crappy perf.
-This was due to training with 0 to 2 components.
-Now it seems that we can recover ok perf. However, we see that a bigger model does better (underfitting)
-we have that 2 layers of 16 filters < 3 layers of 24 filters < 4 layers of 32 filters.
-
-We are now trying 5 layers of 40 filters.
-we are also trying to ablate (3/40, 5/20) to see if depth or width is most important.
-
-Generally, we have seen that the big models were good when trained only for a short time. 
-We can simply use the model as is for now. 
+# Notes to self
 
 We must make sure that the text user interface works with the upgraded model.
 Then we must make a basic graphical user interface for plain data to allow visualization and correction of bad data.
