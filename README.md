@@ -1,3 +1,5 @@
+#ISSUES
+- currently, pretrained model metadata wrongly set. future commit should fix within the day (july 2nd, 2019)
 # EISFitting
 
 Recent Changes:
