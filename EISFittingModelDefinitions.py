@@ -172,55 +172,80 @@ def ImpedanceModel(params_, frequencies_, batch_size, model_meta=None):
 
         imaginary_unit = tf.to_complex128(tf.complex(0., 1.))
 
+        def cpe(index_phi, index_q, mask, multiple=None):
+            bad_piece = tf.pow(imaginary_unit, tf.complex(-processed_params[:, index_phi], batch_zeros))
+            real_bad_piece = tf.real(bad_piece)
+            imag_bad_piece = tf.imag(bad_piece)
+            if multiple is None:
+                multiple = 1.
+            bad_piece2 = (processed_params[:, index_q]/multiple *
+                          tf.pow(exp_frequencies, -processed_params[:, index_phi]) *
+                          mask)
+
+            return tf.complex(real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2)
+
+        imag_freq = tf.complex(full_zeros, exp_frequencies)
+
+        def zarc(index_phi, index_wc, index_r, mask, incepted=None):
+
+            phi = tf.complex(processed_params[:, index_phi], batch_zeros)
+            w_c = tf.complex(processed_params[:, index_wc], batch_zeros)
+            r =   tf.complex(processed_params[:, index_r] * mask, batch_zeros)
+            if incepted is None:
+                return r / (1. + tf.pow((imag_freq / w_c), phi))
+            else:
+                return r / (
+                        (1. / (1. + incepted)) +
+                        tf.pow((imag_freq / w_c), phi))
+
+
         # warburg
 
-        bad_piece = tf.pow(imaginary_unit, tf.complex(-processed_params[:, INDEX_PHI_WARBURG], batch_zeros))
-        real_bad_piece = tf.real(bad_piece)
-        imag_bad_piece = tf.imag(bad_piece)
-        bad_piece2 = (processed_params[:, INDEX_Q_WARBURG] *
-                      tf.pow(exp_frequencies, -processed_params[:, INDEX_PHI_WARBURG]) *
-                      tf.expand_dims(1. - model_meta[:, MODEL_META_WARBURG_INCEPTION], axis=1)
-                      )
-        impedance += tf.complex(real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2)
+        impedance += cpe(
+            INDEX_PHI_WARBURG,
+            INDEX_Q_WARBURG,
+            mask=tf.expand_dims(1. - model_meta[:, MODEL_META_WARBURG_INCEPTION], axis=1)
+        )
 
         # inductance
-        phi = processed_params[:, INDEX_PHI_INDUCTANCE]
-        exp_q = processed_params[:, INDEX_Q_INDUCTANCE] * tf.expand_dims(model_meta[:, MODEL_META_INDUCTANCE],axis=1)
-        bad_piece = tf.pow(imaginary_unit, tf.complex(-phi, batch_zeros))
-        real_bad_piece = tf.real(bad_piece)
-        imag_bad_piece = tf.imag(bad_piece)
-        bad_piece2 = exp_q * tf.pow(exp_frequencies, -phi)
-        impedance += tf.complex(real_bad_piece * bad_piece2,imag_bad_piece * bad_piece2)
+        impedance += cpe(
+            INDEX_PHI_INDUCTANCE,
+            INDEX_Q_INDUCTANCE,
+            mask=tf.expand_dims(model_meta[:, MODEL_META_INDUCTANCE],axis=1)
+        )
 
         # inductance zarc
-        phi = tf.complex(processed_params[:, INDEX_PHI_ZARC_INDUCTANCE], batch_zeros)
-        w_c = tf.complex(processed_params[:, INDEX_W_C_INDUCTANCE], batch_zeros)
-        r = tf.complex(processed_params[:, INDEX_R_ZARC_INDUCTANCE] * tf.expand_dims(model_meta[:, MODEL_META_ZARC_INDUCTANCE],axis=1), batch_zeros)
-        imag_freq = tf.complex(full_zeros, exp_frequencies)
-        impedance += r / (1. + tf.pow((imag_freq / w_c), phi))
+        impedance += zarc(INDEX_PHI_ZARC_INDUCTANCE,
+                          INDEX_W_C_INDUCTANCE,
+                          INDEX_R_ZARC_INDUCTANCE,
+                          mask= tf.expand_dims(model_meta[:, MODEL_META_ZARC_INDUCTANCE],axis=1))
+
 
         for index in range(NUMBER_OF_ZARC):
             # zarc
-            phi = tf.complex(processed_params[:, INDEX_PHI_ZARC_OFFSET + index], batch_zeros)
-            w_c = tf.complex(processed_params[:, INDEX_W_C_ZARC_OFFSET + index], batch_zeros)
-            r = tf.complex(processed_params[:, INDEX_R_ZARC_OFFSET + index] * tf.expand_dims(model_meta[:, MODEL_META_ZARC + index],axis=1), batch_zeros)
-
             if index == 0:
-                bad_piece = tf.pow(imaginary_unit, tf.complex(-processed_params[:, INDEX_PHI_WARBURG], batch_zeros))
-                real_bad_piece = tf.real(bad_piece)
-                imag_bad_piece = tf.imag(bad_piece)
-                bad_piece2 = ((processed_params[:, INDEX_Q_WARBURG]/
-                               processed_params[:, INDEX_R_ZARC_OFFSET + index]) *
-                              tf.pow(exp_frequencies,-processed_params[:,INDEX_PHI_WARBURG]) *
-                              tf.expand_dims(model_meta[:, MODEL_META_WARBURG_INCEPTION], axis=1))
-                warburg_impedance = tf.complex(real_bad_piece * bad_piece2, imag_bad_piece * bad_piece2)
+                warburg_impedance = cpe(
+                    INDEX_PHI_WARBURG,
+                    INDEX_Q_WARBURG,
+                    mask=tf.expand_dims(model_meta[:, MODEL_META_WARBURG_INCEPTION], axis=1),
+                    multiple=processed_params[:, INDEX_R_ZARC_OFFSET + index]
+                )
 
-                impedance += r / (
-                    (1./(1. + warburg_impedance)) +
-                        tf.pow((imag_freq / w_c), phi))
+                impedance += zarc(
+                    INDEX_PHI_ZARC_OFFSET + index,
+                    INDEX_W_C_ZARC_OFFSET + index,
+                    INDEX_R_ZARC_OFFSET + index,
+                    mask = tf.expand_dims(model_meta[:, MODEL_META_ZARC + index],axis=1),
+                    incepted=warburg_impedance
+                )
 
             else:
-                impedance += r / (1. + tf.pow((imag_freq / w_c), phi))
+                impedance += zarc(
+                    INDEX_PHI_ZARC_OFFSET + index,
+                    INDEX_W_C_ZARC_OFFSET + index,
+                    INDEX_R_ZARC_OFFSET + index,
+                    mask=tf.expand_dims(model_meta[:, MODEL_META_ZARC + index], axis=1)
+                )
 
         impedance_real = tf.real(impedance)
         impedance_imag = tf.imag(impedance)
