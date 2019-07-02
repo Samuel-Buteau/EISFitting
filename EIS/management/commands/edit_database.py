@@ -68,7 +68,7 @@ class Command(BaseCommand):
             dummies = [
 
                 {
-                    'logdir': 'OnePercentTraining_big3_new',
+                    'logdir': 'OnePercentTraining',
                     'kernel_size': 7,
                     'conv_filters': 40,
                     'num_conv': 5,
