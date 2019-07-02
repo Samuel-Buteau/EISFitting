@@ -1545,13 +1545,19 @@ def run_through_trained_model(cleaned_data, inverse_model_params, seed=None, chu
         zarc_inductance = 0
 
 
+    if inverse_model_params['warburg_inception']:
+        warburg_inception = 1
+    else:
+        warburg_inception = 0
+
+
 
 
     batch_size = tf.placeholder(dtype=tf.int32)
     prior_mu, prior_log_sigma_sq = Prior()
 
 
-    model_meta_compressed_global = tf.constant([inductance, zarc_inductance, inverse_model_params['num_zarcs']])
+    model_meta_compressed_global = tf.constant([inductance, zarc_inductance, warburg_inception, inverse_model_params['num_zarcs']])
     model_meta_compressed = tf.tile(tf.expand_dims(model_meta_compressed_global, axis=0),multiples=[batch_size, 1])
 
 
@@ -1681,6 +1687,7 @@ def run_inverse_model(args):
             'num_zarcs':args.num_zarcs,
             'inductance':args.inductance,
             'zarc_inductance':args.zarc_inductance,
+            'warburg_inception': args.warburg_inception,
         },
         seed=args.seed,
         chunk_num=args.chunk_num
@@ -1957,15 +1964,15 @@ if __name__ == '__main__':
 
     parser.add_argument('--inductance', dest='inductance', action='store_true')
     parser.add_argument('--no_inductance', dest='inductance', action='store_false')
-    parser.set_defaults(inductance=True)
+    parser.set_defaults(inductance=False)
 
     parser.add_argument('--zarc_inductance', dest='zarc_inductance', action='store_true')
     parser.add_argument('--no_zarc_inductance', dest='zarc_inductance', action='store_false')
-    parser.set_defaults(zarc_inductance=True)
+    parser.set_defaults(zarc_inductance=False)
 
     parser.add_argument('--warburg_inception', dest='warburg_inception', action='store_true')
     parser.add_argument('--no_warburg_inception', dest='warburg_inception', action='store_false')
-    parser.set_defaults(warburg_inception=True)
+    parser.set_defaults(warburg_inception=False)
 
     parser.add_argument('--num_zarcs', type=int, default=3)
 

@@ -610,7 +610,7 @@ class Command(BaseCommand):
 
         parser.add_argument('--warburg_inception', dest='warburg_inception', action='store_true')
         parser.add_argument('--no_warburg_inception', dest='warburg_inception', action='store_false')
-        parser.set_defaults(warburg_inception=True)
+        parser.set_defaults(warburg_inception=False)
 
 
         parser.add_argument('--num_zarcs', type=int, default=3)
