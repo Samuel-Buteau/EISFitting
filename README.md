@@ -5,6 +5,16 @@ Now, many equivalent circuits are implemented.
 
 ## Important Bugs Fixed
 - the parameters 'Q warburg' and 'Q inductance' used to be outputted as 1/Q instead. This is now fixed. 
+
+## The Paper
+Analysis of Thousands of Electrochemical Impedance Spectra of Lithium-Ion Cells through a Machine Learning Inverse Model
+by Sam Buteau and J. R. Dahn
+
+doi: 10.1149/2.1051908jes
+J. Electrochem. Soc. 2019 volume 166, issue 8, A1611-A1622
+
+This repository was released together with a paper, which explains the approach taken and some of the terminology.
+
 # Usage
 
 The current version of the software comes with a pretrained model, 
