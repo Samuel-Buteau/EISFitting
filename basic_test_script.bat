@@ -1,1 +1,9 @@
-python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER000 --output_dir=OutputData_test
+python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER000 --output_dir=OutputData_no_options_3zarcs
+python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER001 --output_dir=OutputData_no_options_2zarcs --num_zarcs=2
+python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER000 --output_dir=OutputData_inception_3zarcs --warburg_inception
+python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER001 --output_dir=OutputData_inception_2zarcs --warburg_inception --num_zarcs=2
+
+python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER000 --output_dir=OutputData_inductances_3zarcs --inception --zarc_inception
+python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER001 --output_dir=OutputData_inductances_2zarcs --inception --zarc_inception --num_zarcs=2
+python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER000 --output_dir=OutputData_inductances_inception_3zarcs --inception --zarc_inception --warburg_inception
+python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER001 --output_dir=OutputData_inductances_inception_2zarcs --inception --zarc_inception --warburg_inception --num_zarcs=2

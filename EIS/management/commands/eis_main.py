@@ -342,7 +342,7 @@ def import_process_output(args):
                 )
             )
 
-    print(cleaned_data)
+
     results = run_optimizer_on_data(
         cleaned_data=cleaned_data,
         args={
