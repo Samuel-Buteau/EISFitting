@@ -18,7 +18,8 @@ class Command(BaseCommand):
         parser.add_argument('--mode', choices=['add_default_datasets',
                                                'add_default_inverse_models',
                                                'display',
-                                               'clear_all'
+                                               'clear_all',
+                                               'add_default_file_formats'
                                                ])
         parser.add_argument('--model', choices=list(models_dict.keys()) + ['*',''],default='')
 
@@ -91,3 +92,21 @@ class Command(BaseCommand):
                         inv_model.conv_filters=dummy['conv_filters'],
                         inv_model.num_conv=dummy['num_conv'],
                         inv_model.save()
+
+
+        if options['mode'] == 'add_default_file_formats':
+
+            dummies = [
+
+                {
+                    'name': 'MPT',
+                    'extension': '.mpt',
+                },
+                {
+                    'name': 'DAHN_TXT',
+                    'extension': '.txt',
+                },
+
+            ]
+            for dummy in dummies:
+                FileFormat.objects.update_or_create(name=dummy['name'], defaults=dummy)

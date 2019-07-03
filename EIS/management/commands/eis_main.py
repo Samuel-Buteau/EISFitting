@@ -95,12 +95,13 @@ def import_process_output(args):
         return
 
     user_dataset, _ = Dataset.objects.get_or_create(label=args['dataset'])
+    file_format = FileFormat.objects.get(name=args['file_format'])
 
     all_filenames = []
     path_to_robot = args['input_dir']
     for root, dirs, filenames in os.walk(path_to_robot):
         for file in filenames:
-            if file.endswith('.mpt'):
+            if file.endswith(file_format.extension):
                 all_filenames.append(os.path.join(root, file))
 
     # for now, don't record in database, since it takes a long time.
@@ -113,7 +114,7 @@ def import_process_output(args):
 
         if valid:
 
-            if  EISSpectrum.objects.filter(filename=str(filename), dataset__label=args['dataset']).exists():
+            if  EISSpectrum.objects.filter(filename=str(filename), file_format=file_format, dataset__label=args['dataset']).exists():
                 continue
 
             aas = AutomaticActiveSample(
@@ -128,6 +129,7 @@ def import_process_output(args):
             new_spectrum = EISSpectrum(filename=str(filename),
                                        dataset=user_dataset,
                                        automatic_active_sample=aas,
+                                       file_format = file_format
                                        )
             new_spectrum.save()
             all_spectra.append(new_spectrum)
@@ -449,7 +451,7 @@ def import_process_output(args):
 
 
         filename_output = spectrum.filename
-        filename_output = filename_output.split('.mpt')[0].replace('\\', '__').replace('/', '__')
+        filename_output = filename_output.split(spectrum.file_format.extension)[0].replace('\\', '__').replace('/', '__')
         fig = plt.figure()
         gs = GridSpec(2, 2, figure=fig)
 
@@ -612,8 +614,9 @@ class Command(BaseCommand):
         parser.add_argument('--no_warburg_inception', dest='warburg_inception', action='store_false')
         parser.set_defaults(warburg_inception=False)
 
-
         parser.add_argument('--num_zarcs', type=int, default=3)
+
+        parser.add_argument('--file_format', default='MPT',choices=[d.name for d in FileFormat.objects.all()])
 
     def handle(self, *args, **options):
         

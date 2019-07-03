@@ -68,10 +68,14 @@ class ShiftScaleParameters(models.Model):
         return {'r_alpha':self.r_alpha, 'w_alpha':self.w_alpha}
 
 
+class FileFormat(models.Model):
+    name = models.CharField(max_length=100)
+    extension = models.CharField(max_length=10)
+
 #The base class for a spectrum
 class EISSpectrum(models.Model):
     filename = models.CharField(max_length=1000)
-
+    file_format = models.ForeignKey(FileFormat, on_delete=models.CASCADE)
     active = models.BooleanField(default=True)
     dataset = models.ForeignKey(Dataset,
                                 on_delete=models.SET_NULL,
