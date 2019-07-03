@@ -35,7 +35,7 @@ from EISFittingModelDefinitions import Prior,ParameterVAE, shift_scale_param_ext
 
 
 
-def get_inv_model_results_or_none(spectrum, inv_model, inductance, zarc_inductance, num_zarcs):
+def get_inv_model_results_or_none(spectrum, inv_model, inductance, zarc_inductance, warburg_inception, num_zarcs):
     '''
 
     returns two values. first is the inv_model_results. second is a bool saying if it existed.
@@ -44,7 +44,7 @@ def get_inv_model_results_or_none(spectrum, inv_model, inductance, zarc_inductan
     :return:
 
     '''
-    query = InverseModelResult.objects.filter(spectrum=spectrum, inv_model=inv_model, inductance=inductance, zarc_inductance=zarc_inductance, num_zarcs=num_zarcs)
+    query = InverseModelResult.objects.filter(spectrum=spectrum, inv_model=inv_model, inductance=inductance, zarc_inductance=zarc_inductance, warburg_inception=warburg_inception, num_zarcs=num_zarcs)
     if query.exists():
         for inv_model_res in query.all():
             match = True
@@ -177,6 +177,7 @@ def import_process_output(args):
             spectrum, inv_model,
             inductance=args['inductance'],
             zarc_inductance=args['zarc_inductance'],
+            warburg_inception=args['warburg_inception'],
             num_zarcs=args['num_zarcs'])
         if already_exists:
             continue
@@ -210,6 +211,7 @@ def import_process_output(args):
             inv_model=inv_model,
             inductance=args['inductance'],
             zarc_inductance=args['zarc_inductance'],
+            warburg_inception=args['warburg_inception'],
             num_zarcs=args['num_zarcs'],
             activity_setting=activity_setting,
             shift_scale_parameters=ssp,
@@ -243,6 +245,7 @@ def import_process_output(args):
             'logdir': inv_model.logdir,
             'inductance' : args['inductance'],
             'zarc_inductance' : args['zarc_inductance'],
+            'warburg_inception': args['warburg_inception'],
             'num_zarcs' : args['num_zarcs'],
         },
         seed=args['seed'],
@@ -296,6 +299,7 @@ def import_process_output(args):
             spectrum, inv_model,
             inductance=args['inductance'],
             zarc_inductance=args['zarc_inductance'],
+            warburg_inception= args['warburg_inception'],
             num_zarcs=args['num_zarcs']
         )
 
@@ -349,6 +353,7 @@ def import_process_output(args):
             'ordering_coeff': args['ordering_coeff'],
             'inductance': args['inductance'],
             'zarc_inductance': args['zarc_inductance'],
+            'warburg_inception': args['warburg_inception'],
             'num_zarcs': args['num_zarcs'],
 
         },
@@ -399,6 +404,7 @@ def import_process_output(args):
             spectrum, inv_model,
             inductance=args['inductance'],
             zarc_inductance=args['zarc_inductance'],
+            warburg_inception=args['warburg_inception'],
             num_zarcs=args['num_zarcs']
         )
 
@@ -595,12 +601,17 @@ class Command(BaseCommand):
         parser.add_argument('--chunk_num', type=int, default=256)
 
         parser.add_argument('--inductance', dest='inductance', action='store_true')
-        parser.add_argument('--no-inductance', dest='inductance', action='store_false')
+        parser.add_argument('--no_inductance', dest='inductance', action='store_false')
         parser.set_defaults(inductance=False)
 
-        parser.add_argument('--zarc-inductance', dest='zarc_inductance', action='store_true')
-        parser.add_argument('--no-zarc-inductance', dest='zarc_inductance', action='store_false')
+        parser.add_argument('--zarc_inductance', dest='zarc_inductance', action='store_true')
+        parser.add_argument('--no_zarc_inductance', dest='zarc_inductance', action='store_false')
         parser.set_defaults(zarc_inductance=False)
+
+        parser.add_argument('--warburg_inception', dest='warburg_inception', action='store_true')
+        parser.add_argument('--no_warburg_inception', dest='warburg_inception', action='store_false')
+        parser.set_defaults(warburg_inception=False)
+
 
         parser.add_argument('--num_zarcs', type=int, default=3)
 
