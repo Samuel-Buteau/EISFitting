@@ -451,7 +451,7 @@ def import_process_output(args):
 
 
         filename_output = spectrum.filename
-        filename_output = filename_output.split(spectrum.file_format.extension)[0].replace('\\', '__').replace('/', '__')
+        filename_output = filename_output.split(spectrum.file_format.extension)[0].replace('\\', '__').replace('/', '__').replace(':', '__').replace('.','__')
         fig = plt.figure()
         gs = GridSpec(2, 2, figure=fig)
 
