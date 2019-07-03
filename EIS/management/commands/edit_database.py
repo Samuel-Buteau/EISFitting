@@ -71,7 +71,7 @@ class Command(BaseCommand):
                     'logdir': 'OnePercentTraining',
                     'kernel_size': 7,
                     'conv_filters': 40,
-                    'num_conv': 5,
+                    'num_conv': 7,
                 },
 
             ]
