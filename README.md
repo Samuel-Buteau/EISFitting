@@ -72,6 +72,7 @@ python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraini
 
 
 ## Specifying the equivalent circuit
+For visual reference of the equivalent circuits available, see *UserManual/manual.pdf*
 
 By default, the equivalent circuit used has 3 ZARC components, and it does not have an inductance nor does it have a zarc inductance.
 If a different number of ZARC components are desired (e.g. 2), simply add e.g. --num_zarcs=2. this would give 
