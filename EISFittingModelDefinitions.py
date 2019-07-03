@@ -1913,7 +1913,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--percent_training', type=int, default=1)
 
-    parser.add_argument('--total_steps', type=int, default=100000)
+    parser.add_argument('--total_steps', type=int, default=300000)
     parser.add_argument('--checkpoint_every', type=int, default=1000)
     parser.add_argument('--log_every', type=int, default=1000)
     parser.add_argument('--dropout', type=float, default=0.1)
