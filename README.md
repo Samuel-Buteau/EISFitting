@@ -1,6 +1,6 @@
 # EISFitting
 
-##Recent Changes
+## Recent Changes
 - Now, 24 equivalent circuits are implemented. 
 - Optional number of ZARC components (1,2,3)
 - Optional inductance 
