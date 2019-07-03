@@ -7,6 +7,8 @@
 - Optional ZARC inductance
 - The warburg element (modelling diffusion resistance) can now be placed either in series with the ZARCs or nested within the resistance branch of the low frequency ZARC. (this is called "warburg_inception".)
 
+- User manual with drawings of the available equivalent circuits.
+- Video tutorial of how to install and use the software can be found at https://youtu.be/z-xAmvJ4HPE
 ## Important Bugs Fixed
 - the parameters 'Q warburg' and 'Q inductance' used to be outputted as 1/Q instead. This is now fixed. 
 - Issues with model configurations and pretrained model not being updated have been solved, with internal testing added before release.
