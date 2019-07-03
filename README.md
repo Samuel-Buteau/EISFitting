@@ -9,6 +9,9 @@
 
 - User manual with drawings of the available equivalent circuits.
 - Video tutorial of how to install and use the software can be found at https://youtu.be/z-xAmvJ4HPE
+- Now supports two file formats.
+    - mpt files in the format of _MPT_example.txt_
+    - txt files in the format of _DAHN_TXT_example.txt_ 
 ## Important Bugs Fixed
 - the parameters 'Q warburg' and 'Q inductance' used to be outputted as 1/Q instead. This is now fixed. 
 - Issues with model configurations and pretrained model not being updated have been solved, with internal testing added before release.
