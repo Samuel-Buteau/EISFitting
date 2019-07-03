@@ -77,9 +77,13 @@ By default, the equivalent circuit used has 3 ZARC components, and it does not h
 If a different number of ZARC components are desired (e.g. 2), simply add e.g. --num_zarcs=2. this would give 
 python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=RealData\EIS --dataset=USER7 --output_dir=OutputData10 --num_zarcs=2
 
-If an inductance is desired, simply pass --inductance
-If a zarc inductance is desired, simply pass --zarc-inductance.
-These can both be passed if both components are desired. 
+- If an inductance is desired, simply pass --inductance
+- If a zarc inductance is desired, simply pass --zarc-inductance
+These can both be passed if both components are desired.
+
+- If the warburg element (modelling diffusion) should be nested within the low frequency ZARC (the ZARC element becoming a parallel circuit of a CPE in parallel with a serial circuit of a resistor with the warburg element in series), simply pass --warburg_inception
+For instance, if you would like a zarc_inductance, 1 electrochemical ZARC, with the warburg nested inside, you would use:
+python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=RealData\EIS --dataset=USER7 --output_dir=OutputData10 --num_zarcs=1 --zarc_inductance --warburg_inception
 
 # Locations
 ## Folders
