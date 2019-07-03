@@ -3,6 +3,8 @@ RealData
 import_test*
 .idea*
 *.png
+*.tex
+*.synctex.gz
 
 MakeFigures_july1.bat
 
