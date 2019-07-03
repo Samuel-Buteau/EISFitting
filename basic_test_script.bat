@@ -3,7 +3,7 @@ python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraini
 python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER000 --output_dir=OutputData_inception_3zarcs --warburg_inception
 python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER001 --output_dir=OutputData_inception_2zarcs --warburg_inception --num_zarcs=2
 
-python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER000 --output_dir=OutputData_inductances_3zarcs --inception --zarc_inception
-python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER001 --output_dir=OutputData_inductances_2zarcs --inception --zarc_inception --num_zarcs=2
-python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER000 --output_dir=OutputData_inductances_inception_3zarcs --inception --zarc_inception --warburg_inception
-python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER001 --output_dir=OutputData_inductances_inception_2zarcs --inception --zarc_inception --warburg_inception --num_zarcs=2
+python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER000 --output_dir=OutputData_inductances_3zarcs --inductance --zarc_inductance
+python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER001 --output_dir=OutputData_inductances_2zarcs --inductance --zarc_inductance --num_zarcs=2
+python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER000 --output_dir=OutputData_inductances_inception_3zarcs --inductance --zarc_inductance --warburg_inception
+python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraining --input_dir=import_test --dataset=USER001 --output_dir=OutputData_inductances_inception_2zarcs --inductance --zarc_inductance --warburg_inception --num_zarcs=2
