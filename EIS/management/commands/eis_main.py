@@ -28,7 +28,7 @@ from matplotlib.gridspec import GridSpec
 
 
 
-from EISFittingModelDefinitions import Prior,ParameterVAE, shift_scale_param_extract,normalized_spectrum,original_spectrum, initialize_session,NonparametricOptimizer, run_through_trained_model, run_optimizer_on_data
+from EISFittingModelDefinitions import Prior, shift_scale_param_extract,normalized_spectrum,original_spectrum, run_through_trained_model, run_optimizer_on_data
 
 
 

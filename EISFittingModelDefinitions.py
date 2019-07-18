@@ -257,7 +257,9 @@ def ImpedanceModel(params_, frequencies_, batch_size, model_meta=None):
 
 
 
-def get_losses(representation_mu, inputs, masks_float, impedances, zarc_meta,valid_freqs_counts,prior_mu,prior_log_sigma_sq, model_meta):
+def get_losses(representation_mu, inputs, masks_float,
+               impedances, zarc_meta,valid_freqs_counts,
+               prior_mu,prior_log_sigma_sq, model_meta):
     _, variances = tf.nn.weighted_moments(inputs[:, :, 1:], axes=[1],
                                           frequency_weights=tf.expand_dims(masks_float, axis=2), keepdims=False)
     std_devs = 1.0 / (0.02 + tf.sqrt(variances))
@@ -378,7 +380,7 @@ def uncompress_model_meta(model_meta_compressed):
 
 
 class InverseModel(tf.keras.Model):
-    def __init__(self, kernel_size, conv_filters, num_conv, trainable, num_encoded, dropout,priors):
+    def __init__(self, kernel_size, conv_filters, num_conv, trainable, num_encoded,priors):
         super(InverseModel, self).__init__()
         self.kernel_size = kernel_size
         self.conv_filters = conv_filters
@@ -473,155 +475,79 @@ class InverseModel(tf.keras.Model):
         return impedances, representation_mu
 
 
-
-
-class NonparametricOptimizer(object):
-    """
-    This is my implementation of Adam optimizer to be used on the EC parameters.
-
-    """
-
+class InverseModelNonparametric(tf.keras.Model):
     def __init__(self, parameter_matrix, spectrum_matrix, valid_freqs_counts_matrix, model_meta_compressed_matrix):
+        super(InverseModelNonparametric, self).__init__()
 
-        self.sensible_phi_coeff = tf.placeholder(dtype=tf.float32)
-        self.simplicity_coeff = tf.placeholder(dtype=tf.float32)
-        self.nll_coeff = tf.placeholder(dtype=tf.float32)
-        self.ordering_coeff = tf.placeholder(dtype=tf.float32)
-        self.parameter_matrix = tf.get_variable(name='parameter_matrix', initializer=parameter_matrix)
+
+        self.parameter_matrix = self.add_variable(
+            name='parameter_matrix',
+            shape=parameter_matrix.shape,
+            initializer=tf.constant_initializer(value=parameter_matrix),
+            trainable=True,
+        )
 
         self.spectrum_matrix = tf.constant(value=spectrum_matrix,
                                            name='spectrum_matrix',
                                            shape=spectrum_matrix.shape,
-                                            )
-        self.valid_freqs_counts_matrix = tf.constant(value=valid_freqs_counts_matrix,
-                                           name='valid_freqs_counts_matrix',
-                                           shape=valid_freqs_counts_matrix.shape,
                                            )
+        self.valid_freqs_counts_matrix = tf.constant(value=valid_freqs_counts_matrix,
+                                                     name='valid_freqs_counts_matrix',
+                                                     shape=valid_freqs_counts_matrix.shape,
+                                                     )
         self.model_meta_compressed_matrix = model_meta_compressed_matrix
 
         self.freqs_num = spectrum_matrix.shape[1]
 
 
-    def build_forward(self, frequencies, batch_size, indices,model_meta):
 
 
+    def call(self, inputs):
+        frequencies, batch_size, indices, model_meta = inputs
 
-        z = tf.gather_nd(
+        z = tf.gather(
             params=self.parameter_matrix,
-            indices=tf.expand_dims(indices, axis=1)
+            indices=indices
         )
+
 
         impedances = ImpedanceModel(z, frequencies, batch_size=batch_size, model_meta=model_meta)
 
         return impedances, z
 
-
-    def optimize_direct(self,
-                        indices, prior_mu,
-                        prior_log_sigma_sq,
-                        learning_rate,
-                        batch_size, trainable=True):
-
-        inputs = tf.gather_nd(
-            params=self.spectrum_matrix,
-            indices=tf.expand_dims(indices, axis=1)
-        )
-
-        valid_freqs_counts = tf.gather_nd(
-            params=self.valid_freqs_counts_matrix,
-            indices=tf.expand_dims(indices, axis=1)
-        )
-        model_meta_compressed = tf.gather_nd(
-            params=self.model_meta_compressed_matrix,
-            indices=tf.expand_dims(indices, axis=1)
-        )
-        uncompressed_model_meta = uncompress_model_meta(model_meta_compressed)
-
-        true_freqs_num = tf.reduce_max(valid_freqs_counts)
-        inputs = inputs[:, :true_freqs_num, :]
-
-
-
-
-        impedances, representation_mu = self.build_forward(
-            frequencies=inputs[:,:,0],
-            batch_size=batch_size,
-            indices=indices,
-            model_meta=uncompressed_model_meta['model_meta']
-
-        )
-
-        masks_logical = tf.sequence_mask(
-            lengths=valid_freqs_counts,
-            maxlen=true_freqs_num,
-        )
-
-        masks_float = tf.cast(masks_logical, dtype=tf.float32)
-
-        results = get_losses(representation_mu,
-                             inputs,
-                             masks_float,
-                             impedances,
-                             uncompressed_model_meta['zarc_meta'],
-                             batch_size,
-                             valid_freqs_counts,
-                             prior_mu,
-                             prior_log_sigma_sq,
-                             uncompressed_model_meta['model_meta']
-        )
-
-
-
-        loss = tf.stop_gradient(results['reconstruction_loss']) * (results['sensible_phi_loss'] * self.sensible_phi_coeff +results['nll_loss'] * self.nll_coeff + results['simplicity_loss'] * self.simplicity_coeff + results['ordering_loss'] * self.ordering_coeff) + results['reconstruction_loss']
-        if trainable:
-
-
-            """
-            we clip the gradient by global norm, currently the default is 10.
-            -- Samuel B., 2018-09-14
-            """
-            optimizer = tf.train.AdamOptimizer(learning_rate)
-            train_step = optimizer.minimize(tf.reduce_sum(loss))
-
-            return tf.reduce_sum(loss), train_step,  impedances,  representation_mu, results['reconstruction_loss']
-
-        else:
-
-            return tf.reduce_sum(loss), impedances, representation_mu, results['reconstruction_loss']
-
-
-
-
+    @tf.function
     def get_indexed_matrices(
             self,
             indices,
             batch_size):
 
-        inputs = tf.gather_nd(
+        inputs = tf.gather(
             params=self.spectrum_matrix,
-            indices=tf.expand_dims(indices, axis=1)
+            indices=indices
         )
         frequencies = inputs[:, :, 0]
 
-        model_meta_compressed = tf.gather_nd(
+        model_meta_compressed = tf.gather(
             params=self.model_meta_compressed_matrix,
-            indices=tf.expand_dims(indices, axis=1)
+            indices=indices
         )
         uncompressed_model_meta = uncompress_model_meta(model_meta_compressed)
 
-        impedances, z = self.build_forward(
-            frequencies=inputs[:, :, 0],
-            batch_size=batch_size,
-            indices=indices,
-            model_meta=uncompressed_model_meta['model_meta']
+        impedances, z = self.call(
+            inputs=(
+                inputs[:, :, 0],
+                batch_size,
+                indices,
+                uncompressed_model_meta['model_meta']
+            )
 
         )
 
 
 
-        valid_freqs_counts = tf.gather_nd(
+        valid_freqs_counts = tf.gather(
             params=self.valid_freqs_counts_matrix,
-            indices=tf.expand_dims(indices, axis=1)
+            indices=indices
         )
 
 
@@ -637,6 +563,8 @@ class NonparametricOptimizer(object):
 
 
         }
+
+
 
 
 
@@ -674,7 +602,6 @@ def run_optimizer_on_data(cleaned_data, args, chunk_num):
         all_params[main_index, :] = cleaned_data[main_index][3]
 
     # build the computation graph
-    batch_size = tf.placeholder(dtype=tf.int32)
     prior_mu, prior_log_sigma_sq = Prior()
 
     if args['inductance']:
@@ -695,36 +622,11 @@ def run_optimizer_on_data(cleaned_data, args, chunk_num):
 
 
     model_meta_compressed_global = tf.constant(numpy.array([inductance, zarc_inductance, warburg_inception, args['num_zarcs']], dtype=numpy.int32))
-    model_meta_compressed = tf.tile(tf.expand_dims(model_meta_compressed_global, axis=0), multiples=[spectrum_count, 1])
-    print(model_meta_compressed)
 
-    indices = tf.placeholder(shape=[None], dtype=tf.int32)
 
-    model = NonparametricOptimizer(
-        parameter_matrix=all_params,
-        spectrum_matrix=all_spectra,
-        valid_freqs_counts_matrix=all_valid_freqs_counts,
-        model_meta_compressed_matrix= model_meta_compressed,
-    )
 
-    loss, train_step, impedances, representation_mu, my_reconstruction_loss = \
-        model.optimize_direct(
-            indices=indices, prior_mu=prior_mu,
-            prior_log_sigma_sq=prior_log_sigma_sq,
-            learning_rate=args['learning_rate'],
-            batch_size=batch_size
-        )
 
-    indexed_matrices = \
-        model.get_indexed_matrices(
-            indices=indices,
-            batch_size=batch_size
-        )
 
-    step = tf.train.get_or_create_global_step()
-    increment_step = step.assign_add(1)
-
-    # for now, batch_size is just the total size
 
     actual_batch_size = spectrum_count
     full_index_list = range(actual_batch_size)
@@ -736,54 +638,107 @@ def run_optimizer_on_data(cleaned_data, args, chunk_num):
 
     results = []
     for full_index_list in full_index_lists:
-        with tf.Session() as sess:
-            sess.run(tf.global_variables_initializer())
+        model_meta_compressed = tf.tile(tf.expand_dims(model_meta_compressed_global, axis=0),
+                                        multiples=[len(full_index_list), 1])
 
-            while True:
-                current_step = sess.run(step)
-                if current_step >= 1001:
-                    print('Training complete.')
-                    break
+        model = InverseModelNonparametric(
+            parameter_matrix=all_params[full_index_list],
+            spectrum_matrix=all_spectra[full_index_list],
+            valid_freqs_counts_matrix=all_valid_freqs_counts[full_index_list],
+            model_meta_compressed_matrix=model_meta_compressed,
+        )
+        optimizer = tf.keras.optimizers.Adam(args['learning_rate'])
 
-                loss_value, _, step_value = \
-                    sess.run([loss, train_step, increment_step],
-                             feed_dict={
-                                 batch_size: len(full_index_list),
-                                 indices: full_index_list,
-                                 model.sensible_phi_coeff: args['sensible_phi_coeff'],
-                                 model.simplicity_coeff: args['simplicity_coeff'],
-                                 model.nll_coeff: args['nll_coeff'],
-                                 model.ordering_coeff: args['ordering_coeff']
-                             })
+        @tf.function
+        def optimizer_step(indices, batch_size):
+            inputs = tf.gather(
+                params=model.spectrum_matrix,
+                indices=indices
+            )
 
-                if (current_step % 100) == 0:
-                    print('iteration {}, total loss {}'.format(current_step, loss_value))
-                if current_step == 1000:
-                    freq_val, in_val, out_val, valid_freqs_counts_val, param_val = \
-                        sess.run([
-                            indexed_matrices['frequencies'],
-                            indexed_matrices['in_impedances'],
-                            indexed_matrices['out_impedances'],
-                            indexed_matrices['valid_freqs_counts'],
-                            indexed_matrices['parameters'],
-                        ],
-                            feed_dict={
-                                batch_size: len(full_index_list),
-                                indices: full_index_list,
-                            })
+            valid_freqs_counts = tf.gather(
+                params=model.valid_freqs_counts_matrix,
+                indices=indices
+            )
+            model_meta_compressed = tf.gather(
+                params=model.model_meta_compressed_matrix,
+                indices=indices
+            )
+            uncompressed_model_meta = uncompress_model_meta(model_meta_compressed)
 
-                    ids_val = [all_ids[ind] for ind in full_index_list]
+            true_freqs_num = tf.reduce_max(valid_freqs_counts)
+            inputs = inputs[:, :true_freqs_num, :]
 
-                    for ind in range(len(full_index_list)):
-                        results.append(
-                            (
-                                freq_val[ind, :valid_freqs_counts_val[ind]],
-                                in_val[ind, :valid_freqs_counts_val[ind], :],
-                                out_val[ind, :valid_freqs_counts_val[ind], :],
-                                param_val[ind, :],
-                                ids_val[ind]
-                            )
-                        )
+            with tf.GradientTape() as tape:
+                impedances, representation_mu = model(
+                    inputs=(
+                        inputs[:, :, 0],
+                        batch_size,
+                        indices,
+                        uncompressed_model_meta['model_meta'],
+                    )
+                )
+
+                masks_logical = tf.sequence_mask(
+                    lengths=valid_freqs_counts,
+                    maxlen=true_freqs_num,
+                )
+
+                masks_float = tf.cast(masks_logical, dtype=tf.float32)
+
+                results = get_losses(representation_mu,
+                                     inputs,
+                                     masks_float,
+                                     impedances,
+                                     uncompressed_model_meta['zarc_meta'],
+                                     valid_freqs_counts,
+                                     prior_mu,
+                                     prior_log_sigma_sq,
+                                     uncompressed_model_meta['model_meta']
+                                     )
+
+                loss = tf.reduce_sum(
+                    tf.stop_gradient(results['reconstruction_loss']) * (
+                            results['sensible_phi_loss'] * args['sensible_phi_coeff'] + results['nll_loss'] * args[
+                        'nll_coeff'] +
+                            results['simplicity_loss'] * args['simplicity_coeff'] + results[
+                                'ordering_loss'] * args['ordering_coeff']) + results['reconstruction_loss']
+                )
+
+            gradients = tape.gradient(loss, model.trainable_variables)
+
+            optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+
+            return loss
+
+        for current_step in range(1000):
+            loss_value = optimizer_step(
+                indices=range(len(full_index_list)),
+                batch_size=len(full_index_list)
+            )
+
+            if (current_step % 100) == 0:
+                print('iteration {}, total loss {}'.format(current_step, loss_value))
+
+
+        indexed_matrices = model.get_indexed_matrices(
+            indices=range(len(full_index_list)),
+            batch_size=len(full_index_list)
+        )
+
+        ids_val = [all_ids[ind] for ind in full_index_list]
+
+        for ind in range(len(full_index_list)):
+            vfcvi = indexed_matrices['valid_freqs_counts'][ind]
+            results.append(
+                (
+                    indexed_matrices['frequencies'][ind, :vfcvi].numpy(),
+                    indexed_matrices['in_impedances'][ind, :vfcvi, :].numpy(),
+                    indexed_matrices['out_impedances'][ind, :vfcvi, :].numpy(),
+                    indexed_matrices['parameters'][ind, :].numpy(),
+                    ids_val[ind]
+                )
+            )
 
     return results
 
@@ -849,32 +804,6 @@ def finetune(args):
 
 
 
-@contextlib.contextmanager
-def initialize_session(logdir, sampling =False, seed=None):
-    """Create a session and saver initialized from a checkpoint if found."""
-    numpy.random.seed(seed=seed)
-
-    if sampling:
-        config = tf.ConfigProto(
-            #device_count={'GPU': 0}
-        )
-    else:
-        config = tf.ConfigProto(
-            #device_count={'GPU': 0}
-        )
-    # config.gpu_options.allow_growth = True
-    logdir = os.path.expanduser(logdir)
-    checkpoint = tf.train.latest_checkpoint(logdir)
-    saver = tf.train.Saver()
-    with tf.Session(config=config) as sess:
-        if checkpoint:
-            print('Load checkpoint {}.'.format(checkpoint))
-            saver.restore(sess, checkpoint)
-        else:
-            print('Initialize new model.')
-            os.makedirs(logdir, exist_ok=True)
-            sess.run(tf.global_variables_initializer())
-        yield sess, saver
 
 
 
@@ -905,60 +834,6 @@ class GroupBy():
 
 import copy
 
-class GetFresh:
-    """
-    Get fresh numbers, either
-        - from 0 to n_samples-1 or
-        - from list_of_indecies
-    in a random order without repetition
-    However, once we have exausted all the numbers, we reset.
-    - Samuel Buteau, October 2018
-    """
-
-    def __init__(self, n_samples=None, list_of_indecies=None):
-        if not n_samples is None:
-            self.GetFresh_list = numpy.arange(n_samples, dtype=numpy.int32)
-            self.get_fresh_count = n_samples
-        elif not list_of_indecies is None:
-            self.GetFresh_list = numpy.array(copy.deepcopy(list_of_indecies))
-            self.get_fresh_count = len(self.GetFresh_list)
-        else:
-            raise Exception('Invalid Input')
-
-        numpy.random.shuffle(self.GetFresh_list)
-        self.get_fresh_pos = 0
-
-    def get(self, n):
-        """
-        will return a list of n random numbers in self.GetFresh_list
-        - Samuel Buteau, October 2018
-        """
-        if n >= self.get_fresh_count:
-            return self.GetFresh_list
-
-        reshuffle_flag = False
-
-        n_immediate_fulfill = min(n, self.get_fresh_count - self.get_fresh_pos)
-        batch_of_indecies = numpy.empty([n], dtype=numpy.int32)
-        for i in range(0, n_immediate_fulfill):
-            batch_of_indecies[i] = self.GetFresh_list[i + self.get_fresh_pos]
-
-        self.get_fresh_pos += n_immediate_fulfill
-        if self.get_fresh_pos >= self.get_fresh_count:
-            self.get_fresh_pos -= self.get_fresh_count
-            reshuffle_flag = True
-
-            # Now, the orders that needed to be satisfied are satisfied.
-        n_delayed_fulfill = max(0, n - n_immediate_fulfill)
-        if reshuffle_flag:
-            numpy.random.shuffle(self.GetFresh_list)
-
-        if n_delayed_fulfill > 0:
-            for i in range(0, n_delayed_fulfill):
-                batch_of_indecies[i + n_immediate_fulfill] = self.GetFresh_list[i]
-            self.get_fresh_pos = n_delayed_fulfill
-
-        return batch_of_indecies
 
 
 
@@ -1398,7 +1273,9 @@ def deparameterized_params(params):
 
 
 
-def run_through_trained_model(cleaned_data, inverse_model_params, seed=None, chunk_num=32):
+def run_through_trained_model(
+        cleaned_data, inverse_model_params,
+        seed=None, chunk_num=32):
 
     if inverse_model_params['inductance']:
         inductance = 1
@@ -1418,13 +1295,10 @@ def run_through_trained_model(cleaned_data, inverse_model_params, seed=None, chu
 
 
 
-
-    batch_size = tf.placeholder(dtype=tf.int32)
     prior_mu, prior_log_sigma_sq = Prior()
 
 
     model_meta_compressed_global = tf.constant([inductance, zarc_inductance, warburg_inception, inverse_model_params['num_zarcs']])
-    model_meta_compressed = tf.tile(tf.expand_dims(model_meta_compressed_global, axis=0),multiples=[batch_size, 1])
 
 
     cleaned_data_lens = [len(c[0]) for c in cleaned_data]
@@ -1444,57 +1318,69 @@ def run_through_trained_model(cleaned_data, inverse_model_params, seed=None, chu
         for j in range(3):
             full_data[ind, :full_data_freqs_counts[ind], j] = numpy.array(cleaned_data[ind][j])
 
-    inputs = tf.placeholder(shape=[None, max_freq_num, 3], dtype=tf.float32)
-    valid_freqs_counts = tf.placeholder(shape=[None], dtype=tf.int32)
-
-    model = ParameterVAE(
+    model = InverseModel(
         kernel_size=inverse_model_params['kernel_size'],
         conv_filters=inverse_model_params['conv_filters'],
         num_conv=inverse_model_params['num_conv'],
         trainable=False,
-        num_encoded=NUMBER_OF_PARAM)
+        num_encoded=NUMBER_OF_PARAM,
+        priors=prior_mu
+    )
+    ckpt = tf.train.Checkpoint(net=model)
+    _ = ckpt.restore(tf.train.latest_checkpoint(inverse_model_params['logdir'])).expect_partial()
+    if tf.train.latest_checkpoint(inverse_model_params['logdir']):
+        print("Restored from {}".format(tf.train.latest_checkpoint(inverse_model_params['logdir'])))
+    else:
+        print("Didn't find a pretrained model.")
 
-    impedances, representation_mu = \
-            model.optimize_direct(inputs=inputs,
-                                  valid_freqs_counts=valid_freqs_counts,
-                                  model_meta_compressed=model_meta_compressed,
-                                  prior_mu=prior_mu,
-                                  prior_log_sigma_sq=prior_log_sigma_sq,
-                                  batch_size=batch_size,
-                                  create_loss=False)
+    @tf.function
+    def evaluate_model(inputs, valid_freqs_counts, batch_size):
+        model_meta_compressed = tf.tile(tf.expand_dims(model_meta_compressed_global, axis=0), multiples=[batch_size, 1])
+
+        true_freqs_num = tf.reduce_max(valid_freqs_counts)
+        masks_logical = tf.sequence_mask(
+            lengths=valid_freqs_counts,
+            maxlen=true_freqs_num,
+        )
+
+        inputs = inputs[:, :true_freqs_num, :]
+        uncompressed_model_meta = uncompress_model_meta(model_meta_compressed)
+        impedances, representation_mu = model(
+            (inputs, masks_logical, uncompressed_model_meta['model_meta'], batch_size, true_freqs_num),
+            training=False
+        )
+        return impedances, representation_mu
+
+
 
     results = []
-    with initialize_session(logdir=inverse_model_params['logdir'], seed=seed) as (sess, saver):
-        actual_batch_size = spectrum_count
-        full_index_list = range(actual_batch_size)
-        if actual_batch_size < chunk_num:
-            full_index_lists = numpy.array([full_index_list])
-        else:
-            num_chunks = 1 + int(actual_batch_size / chunk_num )
-            full_index_lists = numpy.array_split(full_index_list, num_chunks)
+    actual_batch_size = spectrum_count
+    full_index_list = range(actual_batch_size)
+    if actual_batch_size < chunk_num:
+        full_index_lists = numpy.array([full_index_list])
+    else:
+        num_chunks = 1 + int(actual_batch_size / chunk_num )
+        full_index_lists = numpy.array_split(full_index_list, num_chunks)
 
-        for list_of_ind in full_index_lists:
-            out_impedance, representation_mu_value = \
-                sess.run([impedances, representation_mu],
-                         feed_dict={
-                             batch_size: len(list_of_ind),
-                             inputs: full_data[list_of_ind],
-                             valid_freqs_counts: full_data_freqs_counts[list_of_ind],
-                             model.dropout: 0.0,
-                         })
+    for list_of_ind in full_index_lists:
+        out_impedance, representation_mu_value = evaluate_model(
+            batch_size=len(list_of_ind),
+            inputs=full_data[list_of_ind],
+            valid_freqs_counts=full_data_freqs_counts[list_of_ind]
+        )
 
-            for s in range(len(list_of_ind)):
-                ind = list_of_ind[s]
-                results.append(
-                    (
-                        full_data[ind, :full_data_freqs_counts[ind], 0],
-                        full_data[ind, :full_data_freqs_counts[ind], 1:],
-                        out_impedance[s, :full_data_freqs_counts[ind], :],
-                        representation_mu_value[s, :],
-                        full_data_ids[ind]
+        for s in range(len(list_of_ind)):
+            ind = list_of_ind[s]
+            results.append(
+                (
+                    full_data[ind, :full_data_freqs_counts[ind], 0],
+                    full_data[ind, :full_data_freqs_counts[ind], 1:],
+                    out_impedance[s, :full_data_freqs_counts[ind], :].numpy(),
+                    representation_mu_value[s, :].numpy(),
+                    full_data_ids[ind]
 
-                    )
                 )
+            )
 
     return results
 
