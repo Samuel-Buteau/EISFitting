@@ -125,7 +125,7 @@ def Prior():
 
 
 
-def ImpedanceModel(params_, frequencies_, batch_size, model_meta=None):
+def ImpedanceModel(params_, frequencies_, batch_size, model_meta):
     '''
 
     right now, model_meta
@@ -416,6 +416,13 @@ class InverseModel(tf.keras.Model):
                              name="conv_res_{}".format(i)))
 
 
+        self.to_full_range = tf.keras.layers.Conv1D(
+                2*self.conv_filters, kernel_size=1,
+                activation=None,
+                data_format="channels_last",
+                padding="same",
+                name="down_sample")
+
         self._output_layer = tf.keras.layers.Dense(
             units=self.num_encoded, activation=None, trainable=trainable,
             name="output_layer")
@@ -449,6 +456,8 @@ class InverseModel(tf.keras.Model):
         for i in range(len(self.encoding_layers)):
             hidden = self.encoding_layers[i](hidden, training=training)
 
+        #NOTE: without this, it was impossible to get negative logits, which might explain poor perf.
+        hidden = self.to_full_range(hidden)
         hidden_preweights = hidden[:,:,self.conv_filters:]
         hidden_values = hidden[:,:, :self.conv_filters]
 
@@ -1017,32 +1026,6 @@ def train(args):
 
     dataset= dataset.batch(args.batch_size)
 
-    model_meta_compressed = tf.concat(
-        (
-            tf.random.uniform(
-                [args.batch_size, 2],
-                minval=args.inductances_training_lower,
-                maxval=args.inductances_training_upper + 1,
-                dtype=tf.int32,
-            ),
-            tf.random.uniform(
-                [args.batch_size, 1],
-                minval=args.inception_training_lower,
-                maxval=args.inception_training_upper + 1,
-                dtype=tf.int32,
-            ),
-            tf.random.uniform(
-                [args.batch_size, 1],
-                minval=args.num_zarcs_training_lower,
-                maxval=args.num_zarcs_training_upper + 1,
-                dtype=tf.int32,
-            ),
-
-        ),
-        axis=1
-    )
-    epsilon_scale = .1 * tf.random.uniform(shape=[batch_size], minval=-2., maxval=2., dtype=tf.float32)
-    epsilon_frequency_translate = .5 * tf.random.uniform(shape=[batch_size], minval=-2., maxval=2., dtype=tf.float32)
 
     model = InverseModel(
         kernel_size=args.kernel_size,
@@ -1050,7 +1033,6 @@ def train(args):
         num_conv=args.num_conv,
         trainable=True,
         num_encoded=NUMBER_OF_PARAM,
-        dropout=args.dropout,
         priors=prior_mu
     )
 
@@ -1063,9 +1045,11 @@ def train(args):
     else:
         print("Initializing from scratch.")
 
+    summary_writer = tf.summary.create_file_writer(os.path.join(args.logdir, 'summaries'))
 
     @tf.function
-    def train_step(inputs_fresh, valid_freqs_counts):
+    def train_step(inputs_fresh, valid_freqs_counts, model_meta_compressed, epsilon_scale, epsilon_frequency_translate):
+        #make sure to call the randomness every time
 
         frequencies = inputs_fresh[:,:,0]
 
@@ -1135,7 +1119,13 @@ def train(args):
                            tf.reduce_mean(results['ordering_loss']) * args.ordering_coeff
                    ) + tf.reduce_mean(results['reconstruction_loss'])
 
-
+            with summary_writer.as_default():
+                tf.summary.scalar('sqrt(reconstruction loss)', tf.sqrt(tf.reduce_mean(results['reconstruction_loss'])),
+                                  step=optimizer.iterations)
+                tf.summary.scalar('simplicity loss', tf.reduce_mean(results['simplicity_loss']),
+                                  step=optimizer.iterations)
+                tf.summary.scalar('nll loss', tf.reduce_mean(results['nll_loss']),
+                                  step=optimizer.iterations)
 
         gradients = tape.gradient(loss, model.trainable_variables)
 
@@ -1144,6 +1134,74 @@ def train(args):
         optimizer.apply_gradients(zip(gradients_norm_clipped, model.trainable_variables))
         return loss, tf.reduce_mean(results['reconstruction_loss'])
 
+    @tf.function
+    def test_step(inputs_fresh, valid_freqs_counts, model_meta_compressed, epsilon_scale, epsilon_frequency_translate):
+        # make sure to call the randomness every time
+
+        frequencies = inputs_fresh[:, :, 0]
+
+        input_impedances = inputs_fresh[:, :, 1:]
+
+        squared_impedances = input_impedances[:, :, 0] ** 2 + input_impedances[:, :, 1] ** 2
+
+        masks_logical = tf.sequence_mask(
+            lengths=valid_freqs_counts,
+            maxlen=max_freq_num,
+        )
+
+        masked_squared_impedances = tf.where(masks_logical, squared_impedances,
+                                             tf.ones_like(squared_impedances) * (-tf.float32.max))
+
+        maxes = epsilon_scale - 0.5 * tf.math.log(0.00001 + tf.reduce_max(masked_squared_impedances, axis=1))
+        pure_impedances = tf.exp(tf.expand_dims(tf.expand_dims(maxes, axis=1), axis=2)) * input_impedances
+
+        max_frequencies = tf.gather_nd(
+            params=frequencies,
+            indices=tf.stack((tf.range(batch_size), valid_freqs_counts - 1), axis=1)
+        )
+
+        avg_freq = .5 * (frequencies[:, 0] + max_frequencies) + epsilon_frequency_translate
+
+        pure_frequencies = frequencies - tf.expand_dims(avg_freq, axis=1)
+        inputs = tf.concat([tf.expand_dims(pure_frequencies, axis=2), pure_impedances], axis=2)
+
+        true_freqs_num = tf.reduce_max(valid_freqs_counts)
+        masks_logical = tf.sequence_mask(
+            lengths=valid_freqs_counts,
+            maxlen=true_freqs_num,
+        )
+
+        inputs = inputs[:, :true_freqs_num, :]
+
+        masks_float = tf.cast(masks_logical, dtype=tf.float32)
+
+        uncompressed_model_meta = uncompress_model_meta(model_meta_compressed)
+        impedances, representation_mu = model(
+            (inputs, masks_logical, uncompressed_model_meta['model_meta'], args.batch_size, true_freqs_num),
+            training=False
+        )
+
+        results = get_losses(
+            representation_mu,
+            inputs,
+            masks_float,
+            impedances,
+            uncompressed_model_meta['zarc_meta'],
+            valid_freqs_counts,
+            prior_mu,
+            prior_log_sigma_sq,
+            uncompressed_model_meta['model_meta'],
+        )
+
+        loss = tf.reduce_mean(
+            tf.stop_gradient(results['reconstruction_loss'])) * (
+                       tf.reduce_mean(results['sensible_phi_loss']) * args.sensible_phi_coeff +
+                       tf.reduce_mean(results['nll_loss']) * args.nll_coeff +
+                       tf.reduce_mean(results['simplicity_loss']) * args.simplicity_coeff +
+                       tf.reduce_mean(results['ordering_loss']) * args.ordering_coeff
+               ) + tf.reduce_mean(results['reconstruction_loss'])
+
+        return loss, tf.reduce_mean(results['reconstruction_loss'])
 
     reconstruction_loss_avg = 1.0
     for inputs_fresh, valid_freqs_counts in dataset:
@@ -1152,12 +1210,52 @@ def train(args):
             print('Training complete.')
             break
 
-        loss, reconstruction_loss = train_step(inputs_fresh, valid_freqs_counts)
+        model_meta_compressed = tf.concat(
+            (
+                tf.random.uniform(
+                    [args.batch_size, 2],
+                    minval=args.inductances_training_lower,
+                    maxval=args.inductances_training_upper + 1,
+                    dtype=tf.int32,
+                ),
+                tf.random.uniform(
+                    [args.batch_size, 1],
+                    minval=args.inception_training_lower,
+                    maxval=args.inception_training_upper + 1,
+                    dtype=tf.int32,
+                ),
+                tf.random.uniform(
+                    [args.batch_size, 1],
+                    minval=args.num_zarcs_training_lower,
+                    maxval=args.num_zarcs_training_upper + 1,
+                    dtype=tf.int32,
+                ),
+
+            ),
+            axis=1
+        )
+        epsilon_scale = .1 * tf.random.uniform(shape=[batch_size], minval=-2., maxval=2., dtype=tf.float32)
+        epsilon_frequency_translate = .5 * tf.random.uniform(shape=[batch_size], minval=-2., maxval=2.,
+                                                             dtype=tf.float32)
+
+
+        loss, reconstruction_loss = train_step(inputs_fresh, valid_freqs_counts, model_meta_compressed, epsilon_scale, epsilon_frequency_translate)
+
+
         reconstruction_loss_avg = reconstruction_loss_avg * .99 + reconstruction_loss.numpy() * (1. - .99)
+
         ckpt.step.assign_add(1)
         if int(ckpt.step) % args.log_every == 0:
+            loss_test, reconstruction_loss_test = test_step(inputs_fresh, valid_freqs_counts, model_meta_compressed, epsilon_scale, epsilon_frequency_translate)
+
             print(
-                'Step {} loss {}, reconstruction_loss {}.'.format(int(ckpt.step), loss.numpy(), reconstruction_loss_avg))
+                'Step {} loss {}, reconstruction_loss {}. test loss {}, test reconstruction_loss {}'.format(int(ckpt.step),
+                                                                                                            loss.numpy(),
+                                                                                                            reconstruction_loss_avg,
+                                                                                                            loss_test.numpy(),
+                                                                                                            reconstruction_loss_test.numpy()
+                                                                                                            ))
+
         if int(ckpt.step) % args.checkpoint_every == 0:
             save_path = manager.save()
             print("Saved checkpoint for step {}: {}".format(int(ckpt.step), save_path))
@@ -1407,8 +1505,9 @@ def run_inverse_model(args):
 
     cleaned_data = []
 
+
     for file_id in data.keys():
-        if file_id in split.keys() and split[file_id]['train']:
+        if file_id in split.keys() and (args.test_with_train != split[file_id]['train']) :
             continue
 
         tails = None
@@ -1655,8 +1754,8 @@ if __name__ == '__main__':
                                     'finetune'])
     parser.add_argument('--logdir')
 
-    parser.add_argument('--batch_size', type=int, default=3*(16+4))
-    parser.add_argument('--learning_rate', type=float, default=2e-3/4.)
+    parser.add_argument('--batch_size', type=int, default=16*(16))
+    parser.add_argument('--learning_rate', type=float, default=4e-4)
 
 
     parser.add_argument('--prob_choose_real', type=float, default=0.9)
@@ -1670,7 +1769,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--percent_training', type=int, default=1)
 
-    parser.add_argument('--total_steps', type=int, default=300000)
+    parser.add_argument('--total_steps', type=int, default=200000)
     parser.add_argument('--checkpoint_every', type=int, default=1000)
     parser.add_argument('--log_every', type=int, default=1000)
     parser.add_argument('--dropout', type=float, default=0.1)
@@ -1735,6 +1834,10 @@ if __name__ == '__main__':
     parser.add_argument('--inception_training_lower', type=int, default=1)
     parser.add_argument('--inception_training_upper', type=int, default=1)
 
+
+    parser.add_argument('--test_with_train', dest='test_with_train', action='store_true')
+    parser.add_argument('--no_test_with_train', dest='test_with_train', action='store_false')
+    parser.set_defaults(test_with_train=False)
 
     args = parser.parse_args()
     if args.mode == 'train':

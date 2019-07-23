@@ -104,15 +104,36 @@ python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraini
 - db.sqlite3 holds the data provided by the user. The program handles interactions with this file. Please leave alone.
 - LICENSE contains the license
 - manage.py is the entry point for the program.
-- requirements.txt contains the requirements. (excluding python 3.6)
+- requirements.txt contains the requirements.
 
 
 
 # Requirements
-see requirements.txt
-install the requirements by running on the command line "pip install *something*" with *something* substituted for a requirement.
+First, this requires Python 3.7.4, with 64-bit support. 
+Then, you can install the required libraries (see next subsections)
+
+## Recommended Install
+to install the required libraries in the recommended configuration, simply run the following on the command line:
+pip install -r requirements.txt
+
+note that you must first navigate in the command line to be in the directory where this README resides.
+
+## Custom GPU Support
+In cases where gpu support is desired and the prerequisites from https://www.tensorflow.org/install/gpu have been installed, then simply run the following on the command line:
+pip install -r requirements_gpu.txt
+
+
+
+
 
 # Notes to self
+We must make a basic graphical user interface for plain data to allow visualization and correction of bad data.
 
-We must make sure that the text user interface works with the upgraded model.
-Then we must make a basic graphical user interface for plain data to allow visualization and correction of bad data.
+
+There was a regression in performance. It is unclear what is to blame. We need to try a few things and reestablish the original performance. 
+- We have confirmed that the model is underfitting in the sense that the performance is poor even on the training data.
+- This will likely require more capacity. But we also need to make sure that the Batch normalization and the learning rate (possibly the dropout) are not to blame.
+- We must also double check whether the model is modulating its predictions based on the desired circuit (i.e. does it do equally well without the circuit as an input?)
+- the test data seems to be systematically better than the train data. This might have something to do with batch normalization.
+
+- Renorm doesn't yield stable training. Let's try with larger batches. 
