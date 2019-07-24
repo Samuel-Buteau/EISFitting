@@ -1782,7 +1782,7 @@ if __name__ == '__main__':
                                     'finetune'])
     parser.add_argument('--logdir')
 
-    parser.add_argument('--batch_size', type=int, default=16*(16))
+    parser.add_argument('--batch_size', type=int, default=4*16*(16))
     parser.add_argument('--learning_rate', type=float, default=4e-4)
 
 
