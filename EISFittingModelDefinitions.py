@@ -1048,7 +1048,7 @@ def train(args):
     summary_writer = tf.summary.create_file_writer(os.path.join(args.logdir, 'summaries'))
 
     @tf.function
-    def train_step(inputs_fresh, valid_freqs_counts, model_meta_compressed, epsilon_scale, epsilon_frequency_translate):
+    def train_step(inputs_fresh, valid_freqs_counts, model_meta_compressed, epsilon_scale, epsilon_frequency_translate, epsilon_real_offset_relative):
         #make sure to call the randomness every time
 
         frequencies = inputs_fresh[:,:,0]
@@ -1069,6 +1069,30 @@ def train(args):
         maxes = epsilon_scale -0.5 * tf.math.log(0.00001 + tf.reduce_max(masked_squared_impedances, axis=1))
         pure_impedances = tf.exp(tf.expand_dims(tf.expand_dims(maxes, axis=1), axis=2)) * input_impedances
 
+        min_resistances = tf.nn.relu(
+            tf.reduce_min(
+                tf.where(
+                    masks_logical,
+                    pure_impedances[:,:,0],
+                    tf.ones_like(pure_impedances[:,:,0]*tf.float32.max)
+                ),
+                axis=1
+            )
+        )
+        pure_impedances = tf.where(
+            masks_logical,
+            pure_impedances+tf.expand_dims(
+                tf.stack(
+                    [
+                        min_resistances * epsilon_real_offset_relative,
+                        tf.zeros_like(min_resistances)
+                    ],
+                    axis=1
+                ),
+                axis=1
+            ),
+            tf.zeros_like(pure_impedances)
+        )
         max_frequencies = tf.gather_nd(
             params=frequencies,
             indices=tf.stack((tf.range(batch_size), valid_freqs_counts-1), axis=1)
@@ -1238,8 +1262,12 @@ def train(args):
         epsilon_frequency_translate = .5 * tf.random.uniform(shape=[batch_size], minval=-2., maxval=2.,
                                                              dtype=tf.float32)
 
-
-        loss, reconstruction_loss = train_step(inputs_fresh, valid_freqs_counts, model_meta_compressed, epsilon_scale, epsilon_frequency_translate)
+        epsilon_real_offset_relative = tf.random.uniform(shape=[batch_size], minval=-.5, maxval=.5, dtype=tf.float32)
+        loss, reconstruction_loss = train_step(
+            inputs_fresh, valid_freqs_counts,
+            model_meta_compressed, epsilon_scale,
+            epsilon_frequency_translate,epsilon_real_offset_relative
+        )
 
 
         reconstruction_loss_avg = reconstruction_loss_avg * .99 + reconstruction_loss.numpy() * (1. - .99)
