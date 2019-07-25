@@ -1384,6 +1384,9 @@ def deparameterized_params(params):
     for i in range(INDEX_Q_WARBURG):
         new_params[i] = math.exp(new_params[i])
 
+    for i in range(INDEX_W_C_ZARC_OFFSET,INDEX_W_C_ZARC_OFFSET + NUMBER_OF_PARAM):
+        new_params[i] = math.exp(new_params[i])
+
     for i in range(INDEX_Q_WARBURG, INDEX_Q_WARBURG + 2):
         #FIXED BUG: the minus sign comes from the definition of q from the paper such that Q = 1/exp(q)
         new_params[i] = math.exp(-new_params[i])
@@ -1391,7 +1394,7 @@ def deparameterized_params(params):
     for i in range(INDEX_PHI_WARBURG,INDEX_PHI_INDUCTANCE):
         new_params[i] = 1./(1. + math.exp(-new_params[i]))
 
-    for i in range(INDEX_PHI_INDUCTANCE, NUMBER_OF_PARAM):
+    for i in range(INDEX_PHI_INDUCTANCE, INDEX_PHI_INDUCTANCE + 2):
 
         new_params[i] = -1./(1. + (new_params[i])**2.)
 
