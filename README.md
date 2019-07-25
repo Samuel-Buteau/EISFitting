@@ -111,7 +111,7 @@ python manage.py eis_main --mode=import_process_output --logdir=OnePercentTraini
 
 
 # Requirements
-First, this requires Python 3.7.4, with 64-bit support. 
+First, this requires Python 3.7.4, with 64-bit support, (for windows ) or Python 3.6.8 with 64-bit support (for linux) 
 Then, you can install the required libraries (see next subsections)
 
 ## Recommended Install
