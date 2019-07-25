@@ -1,4 +1,4 @@
-Note: this branch is currently not working. Always use the master branch!!!!!
+Please use this version of the code, which has many important bug fixes.
 # EISFitting
 
 ## Recent Changes
@@ -16,7 +16,8 @@ Note: this branch is currently not working. Always use the master branch!!!!!
 ## Important Bugs Fixed
 - the parameters 'Q warburg' and 'Q inductance' used to be outputted as 1/Q instead. This is now fixed. 
 - Issues with model configurations and pretrained model not being updated have been solved, with internal testing added before release.
-
+- The W_c Zarc parameters were given in logarithmic scale. Now they are given in the usual scale (rad/s)
+- The plots labels used to be mixed up and the plots were too small. This has been fixed.
 ## The Paper
 Analysis of Thousands of Electrochemical Impedance Spectra of Lithium-Ion Cells through a Machine Learning Inverse Model
 by Sam Buteau and J. R. Dahn
