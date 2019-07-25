@@ -470,7 +470,7 @@ def import_process_output(args):
         ax.plot(fit_spec[:, 0], -fit_spec[:, 2], c='r')
         ax.plot(fit_spec2[:, 0], -fit_spec2[:, 2], c='b')
         ax.set_xlabel('{} {}'.format(freq_symbol, freq_units))
-        ax.set_ylabel('Re[Z] (ohm)')
+        ax.set_ylabel('-Im[Z] (ohm)')
 
         ax = fig.add_subplot(gs[1, 1])
         ax.set_xscale('log')
@@ -478,7 +478,7 @@ def import_process_output(args):
         ax.plot(fit_spec[:, 0], fit_spec[:, 1], c='r')
         ax.plot(fit_spec2[:, 0], fit_spec2[:, 1], c='b')
         ax.set_xlabel('{} {}'.format(freq_symbol, freq_units))
-        ax.set_ylabel('-Im[Z] (ohm)')
+        ax.set_ylabel('Re[Z] (ohm)')
 
         fig.tight_layout(h_pad=0., w_pad=0.)
 
