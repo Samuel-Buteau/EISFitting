@@ -1080,7 +1080,7 @@ def train(args):
             )
         )
         pure_impedances = tf.where(
-            masks_logical,
+            tf.expand_dims(masks_logical, axis=2),
             pure_impedances+tf.expand_dims(
                 tf.stack(
                     [
@@ -1782,7 +1782,7 @@ if __name__ == '__main__':
                                     'finetune'])
     parser.add_argument('--logdir')
 
-    parser.add_argument('--batch_size', type=int, default=4*16*(16))
+    parser.add_argument('--batch_size', type=int, default=16*16*16)
     parser.add_argument('--learning_rate', type=float, default=4e-4)
 
 
