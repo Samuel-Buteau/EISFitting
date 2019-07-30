@@ -130,12 +130,4 @@ pip install -r requirements_gpu.txt
 
 # Notes to self
 We must make a basic graphical user interface for plain data to allow visualization and correction of bad data.
-
-
-There was a regression in performance. It is unclear what is to blame. We need to try a few things and reestablish the original performance. 
-- We have confirmed that the model is underfitting in the sense that the performance is poor even on the training data.
-- This will likely require more capacity. But we also need to make sure that the Batch normalization and the learning rate (possibly the dropout) are not to blame.
-- We must also double check whether the model is modulating its predictions based on the desired circuit (i.e. does it do equally well without the circuit as an input?)
-- the test data seems to be systematically better than the train data. This might have something to do with batch normalization.
-
-- Renorm doesn't yield stable training. Let's try with larger batches. 
+The performance regression was fixed. Solution: when using BatchNormalisation without renorm, must use bigger batches. this was done and the performance was improved.
