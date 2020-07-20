@@ -106,6 +106,10 @@ class Command(BaseCommand):
                     'name': 'DAHN_TXT',
                     'extension': '.txt',
                 },
+                {
+                    'name': 'COLUMBIA_TXT',
+                    'extension': '.txt',
+                },
 
             ]
             for dummy in dummies:

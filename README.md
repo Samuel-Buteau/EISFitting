@@ -10,9 +10,11 @@ Please use this version of the code, which has many important bug fixes.
 
 - User manual with drawings of the available equivalent circuits.
 - Video tutorial of how to install and use the software can be found at https://youtu.be/z-xAmvJ4HPE
-- Now supports two file formats.
+- Now supports three file formats.
     - mpt files in the format of _MPT_example.txt_
-    - txt files in the format of _DAHN_TXT_example.txt_ 
+    - txt files in the format of _DAHN_TXT_example.txt_
+    - txt files in the format of _COLUMBIA_TXT_example.txt_ with the columns freq, real part (ohm), negative imaginary part (ohm).
+     
 ## Important Bugs Fixed
 - the parameters 'Q warburg' and 'Q inductance' used to be outputted as 1/Q instead. This is now fixed. 
 - Issues with model configurations and pretrained model not being updated have been solved, with internal testing added before release.
@@ -59,6 +61,19 @@ the data will be stored in the same place and outputted all at once.
 If you want separate outputs, use different dataset options 
 (i.e. --dataset=USER7 the first time and --dataset=USER8 the second time)
 
+## Specifying the file formats to use
+
+So far, the system knows about 3 file formats:
+- MPT (extension .mpt)
+- DAHN_TXT (extension .txt)
+- COLUMBIA_TXT (extension .txt)
+
+See the various files:
+- MPT_example.mpt
+- DAHN_TXT_example.txt
+- COLUMBIA_TXT_example.txt
+
+To use a specific file_format, for instance COLUMBIA_txt,  add --file_format=COLUMBIA_txt.
 
 ## Specifying a different inverse model
 Furthermore, one can use different versions of the inverse_model. 
@@ -119,15 +134,3 @@ to install the required libraries in the recommended configuration, simply run t
 pip install -r requirements.txt
 
 note that you must first navigate in the command line to be in the directory where this README resides.
-
-## Custom GPU Support
-In cases where gpu support is desired and the prerequisites from https://www.tensorflow.org/install/gpu have been installed, then simply run the following on the command line:
-pip install -r requirements_gpu.txt
-
-
-
-
-
-# Notes to self
-We must make a basic graphical user interface for plain data to allow visualization and correction of bad data.
-The performance regression was fixed. Solution: when using BatchNormalisation without renorm, must use bigger batches. this was done and the performance was improved.

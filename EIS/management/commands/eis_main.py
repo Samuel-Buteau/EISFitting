@@ -108,9 +108,11 @@ def import_process_output(args):
     all_spectra = []
     all_samples = []
 
+    format_name = file_format.name
+
     for filename in all_filenames:
         with open(filename, 'rb') as f:
-            record, valid = import_eis_file(f)
+            record, valid = import_eis_file(f, format=format_name)
 
         if valid:
 
